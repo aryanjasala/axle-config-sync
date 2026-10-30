@@ -1,0 +1,84 @@
+{
+  "$comment": "Screens tests/e2e/a11y.spec.js checks with axe-core. This file belongs to the plugin: apply-template.py only writes it when it is missing. The fields are described in docs/DEVELOPMENT.md.",
+  "include": ["#wpbody-content"],
+  "exclude": [],
+  "screens": [
+    {
+      "name": "Settings > Config Sync, nothing exported yet",
+      "setup": [{ "js": "seed.js", "call": "installFixture" }, { "js": "seed.js", "call": "resetSync" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync",
+      "steps": [{ "waitFor": ".acs-env" }]
+    },
+    {
+      "name": "Status with items in every state",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync",
+      "steps": [{ "waitFor": ".acs-items" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "One item's difference",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&item=options/blogname",
+      "steps": [{ "waitFor": ".acs-diff" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Apply: picking items",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=apply",
+      "steps": [{ "waitFor": ".acs-pick" }, { "click": "[data-acs-select=\"all\"]" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Apply: preview with a dangerous change and a conflict",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=apply",
+      "steps": [{ "click": "[data-acs-select=\"all\"]" }, { "click": "#acs-preview" }, { "waitFor": ".acs-confirm" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Apply: nothing to apply",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=apply",
+      "steps": [{ "waitFor": ".acs-empty" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Export",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=export",
+      "steps": [{ "waitFor": ".acs-export-list" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Track with the option finder",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=track",
+      "steps": [{ "waitFor": ".acs-options-list" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "History, empty",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=history",
+      "steps": [{ "waitFor": ".acs-empty" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "History with a change set",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "seedHistory" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=history",
+      "steps": [{ "waitFor": ".acs-history" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Notice after an export, and the served-directory warning",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "wp": ["eval", "unlink( WP_CONTENT_DIR . '/axle-config/.htaccess' ); delete_transient( 'axle_config_sync_reachable' );"] }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=export",
+      "steps": [{ "click": "button[value=\"all\"]" }, { "waitFor": ".acs-notice" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    }
+  ],
+  "skip": {}
+}
