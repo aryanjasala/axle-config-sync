@@ -1,0 +1,34 @@
+{
+	"$schema": "https://playground.wordpress.net/blueprint-schema.json",
+	"meta": {
+		"title": "Axle Config Sync demo",
+		"author": "aryanjasala"
+	},
+	"landingPage": "/wp-admin/options-general.php?page=axle-config-sync",
+	"preferredVersions": {
+		"php": "8.3",
+		"wp": "latest"
+	},
+	"features": {
+		"networking": true
+	},
+	"login": true,
+	"steps": [
+		{
+			"step": "installPlugin",
+			"pluginData": {
+				"resource": "git:directory",
+				"url": "https://github.com/aryanjasala/axle-config-sync",
+				"ref": "main"
+			},
+			"options": {
+				"activate": true,
+				"targetFolderName": "axle-config-sync"
+			}
+		},
+		{
+			"step": "runPHP",
+			"code": "<?php require_once '/wordpress/wp-load.php'; update_option( 'blogname', 'Bean There Coffee' ); $engine = AryanX\\Axle\\ConfigSync\\Plugin::instance()->engine(); $engine->export(); update_option( 'blogdescription', 'Coffee roasted in small batches' ); $file = WP_CONTENT_DIR . '/axle-config/options/posts_per_page.json'; $data = json_decode( file_get_contents( $file ), true ); $data['value'] = 12; file_put_contents( $file, json_encode( $data, JSON_PRETTY_PRINT ) );"
+		}
+	]
+}
