@@ -5,6 +5,9 @@ parameters:
 		- axle-config-sync.php
 		- uninstall.php
 		- src
+	dynamicConstantNames:
+		- AXLE_CONFIG_SYNC_DIR
+		- AXLE_CONFIG_SYNC_ENV
 	scanFiles:
 		- vendor/php-stubs/wp-cli-stubs/wp-cli-stubs.php
 	bootstrapFiles:

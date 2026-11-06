@@ -52,12 +52,21 @@ final class View {
 		$undone  = isset( $_GET['undone'] ) ? absint( $_GET['undone'] ) : 0;
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
-		printf( '<div class="wrap acs-page" data-applied="%d" data-undone="%d">', (int) $applied, (int) $undone );
-		echo '<h1>' . esc_html__( 'Config Sync', 'axle-config-sync' ) . '</h1>';
+		$env  = Environment::detect();
+		$tone = array(
+			'production' => 'warning',
+			'staging'    => 'info',
+		);
+
+		printf( '<div class="wrap axle-ui acs-page" data-applied="%d" data-undone="%d">', (int) $applied, (int) $undone );
+		echo '<h1 class="wp-heading-inline">' . esc_html__( 'Config Sync', 'axle-config-sync' ) . '</h1>';
+		echo ' <span class="axle-status axle-badge axle-badge--' . esc_attr( $tone[ $env['name'] ] ?? 'neutral' ) . ' acs-env">' . esc_html( ucfirst( $env['name'] ) ) . '</span>';
+		echo '<hr class="wp-header-end">';
 
 		$this->notice( $notice );
-		$this->header();
 		$this->tabs( $tab );
+		$this->intro( $tab );
+		$this->header( $env );
 
 		echo '<div class="acs-tab acs-tab-' . esc_attr( $tab ) . '">';
 		switch ( $tab ) {
@@ -76,7 +85,39 @@ final class View {
 			default:
 				$this->status_tab();
 		}
-		echo '</div></div>';
+		echo '</div>';
+		AxleUi::footer();
+		echo '</div>';
+	}
+
+	/**
+	 * The one sentence that says what the current screen is for.
+	 *
+	 * @param string $tab Current tab.
+	 */
+	private function intro( string $tab ): void {
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only view switches.
+		$item    = isset( $_GET['item'] ) ? sanitize_text_field( wp_unslash( $_GET['item'] ) ) : '';
+		$preview = isset( $_GET['step'] ) && 'preview' === sanitize_key( wp_unslash( $_GET['step'] ) );
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+
+		$intros = array(
+			'status'  => __( 'Compare the settings on this site with the files in the config directory, one item at a time.', 'axle-config-sync' ),
+			'apply'   => __( 'Pick the items to copy from the files onto this site. You see a preview and a diff before anything changes.', 'axle-config-sync' ),
+			'export'  => __( 'Write the live values to one JSON file per item in the config directory. Commit the directory to git. Secrets are written by name only.', 'axle-config-sync' ),
+			/* translators: %s: file name. */
+			'track'   => sprintf( __( 'Choose what Config Sync tracks. The rules are saved to %s in the config directory, so they are in git and reviewed like the rest.', 'axle-config-sync' ), Rules::FILE ),
+			'history' => __( 'Every apply is a change set. Undo puts the earlier values back, and asks you to confirm if something changed since.', 'axle-config-sync' ),
+		);
+
+		$text = $intros[ $tab ] ?? '';
+		if ( 'status' === $tab && '' !== $item ) {
+			$text = __( 'This item in the files and on this site. Apply the file value after you have read the difference.', 'axle-config-sync' );
+		} elseif ( 'apply' === $tab && $preview ) {
+			$text = __( 'Check what will change. Nothing is written until you apply, and you can undo an apply from History.', 'axle-config-sync' );
+		}
+
+		echo '<p class="axle-intro">' . esc_html( $text ) . '</p>';
 	}
 
 	/**
@@ -111,25 +152,23 @@ final class View {
 
 	/**
 	 * Environment, directory, last export and apply.
+	 *
+	 * @param array $env Environment name and source.
 	 */
-	private function header(): void {
-		$env       = Environment::detect();
+	private function header( array $env ): void {
 		$directory = $this->engine->directory();
 		$state     = $this->engine->state()->all();
 
-		echo '<div class="acs-header">';
-		echo '<div class="acs-env-box"><span class="acs-env-label">' . esc_html__( 'Environment', 'axle-config-sync' ) . '</span>';
-		echo '<span class="acs-env acs-env-' . esc_attr( $env['name'] ) . '">' . esc_html( $env['name'] ) . '</span>';
-		/* translators: %s: where the environment came from. */
-		echo '<span class="acs-env-source">' . esc_html( sprintf( __( 'from %s', 'axle-config-sync' ), $env['source'] ) ) . '</span></div>';
-
-		echo '<dl class="acs-facts">';
+		echo '<section class="axle-card acs-header" aria-label="' . esc_attr__( 'This site', 'axle-config-sync' ) . '">';
+		echo '<dl class="axle-facts">';
+		/* translators: 1: environment name, 2: where the environment came from. */
+		echo '<dt>' . esc_html__( 'Environment', 'axle-config-sync' ) . '</dt><dd>' . esc_html( sprintf( __( '%1$s, from %2$s', 'axle-config-sync' ), ucfirst( $env['name'] ), $env['source'] ) ) . '</dd>';
 		echo '<dt>' . esc_html__( 'Config directory', 'axle-config-sync' ) . '</dt><dd><code>' . esc_html( $directory->path() ) . '</code> ';
-		echo $directory->writable() ? '<span class="acs-ok">' . esc_html__( 'writable', 'axle-config-sync' ) . '</span>' : '<span class="acs-bad">' . esc_html__( 'not writable', 'axle-config-sync' ) . '</span>';
+		echo $directory->writable() ? '<span class="axle-badge axle-badge--good">' . esc_html__( 'Writable', 'axle-config-sync' ) . '</span>' : '<span class="axle-badge axle-badge--error">' . esc_html__( 'Not writable', 'axle-config-sync' ) . '</span>';
 		echo '</dd>';
 		echo '<dt>' . esc_html__( 'Last export', 'axle-config-sync' ) . '</dt><dd>' . esc_html( self::when_who( $state['last_export'] ) ) . '</dd>';
 		echo '<dt>' . esc_html__( 'Last apply', 'axle-config-sync' ) . '</dt><dd>' . esc_html( self::when_who( $state['last_apply'] ) ) . '</dd>';
-		echo '</dl></div>';
+		echo '</dl></section>';
 
 		$this->web_root_notice();
 
@@ -149,7 +188,7 @@ final class View {
 
 		$reach = $directory->reachability();
 		if ( 'blocked' === $reach ) {
-			echo '<p class="acs-webroot acs-webroot-ok">' . esc_html__( 'The directory is inside the web root, and the web server refuses requests for it.', 'axle-config-sync' ) . '</p>';
+			echo '<p class="acs-webroot acs-webroot-ok"><span class="axle-badge axle-badge--good">' . esc_html__( 'Protected', 'axle-config-sync' ) . '</span> ' . esc_html__( 'The directory is inside the web root, and the web server refuses requests for it.', 'axle-config-sync' ) . '</p>';
 			return;
 		}
 
@@ -211,23 +250,27 @@ final class View {
 		$all  = $this->engine->rows();
 		$rows = $this->engine->rows( $filters );
 
-		echo '<ul class="acs-counts">';
-		foreach ( Engine::counts( $all ) as $state => $count ) {
-			printf(
-				'<li><a href="%1$s" class="acs-count acs-state-%2$s"%5$s><span class="acs-count-number">%3$d</span> %4$s</a></li>',
+		$links  = array();
+		$counts = Engine::counts( $all );
+		$last   = array_key_last( $counts );
+		foreach ( $counts as $state => $count ) {
+			$links[] = sprintf(
+				'<li><a href="%1$s" class="acs-count acs-state-%2$s%5$s"%6$s>%4$s <span class="count">(%3$d)</span></a>%7$s</li>',
 				esc_url( Page::url( 'status', array( 'state' => $state ) ) ),
 				esc_attr( $state ),
 				(int) $count,
 				esc_html( Engine::state_label( $state ) ),
-				$filters['state'] === $state ? ' aria-current="true"' : ''
+				$filters['state'] === $state ? ' current' : '',
+				$filters['state'] === $state ? ' aria-current="true"' : '',
+				$state === $last ? '' : ' |'
 			);
 		}
-		echo '</ul>';
+		echo '<ul class="subsubsub acs-counts">' . implode( '', $links ) . '</ul>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
 
 		$this->filter_form( $filters );
 
 		if ( ! $rows ) {
-			echo '<p class="acs-empty">' . esc_html__( 'No items match.', 'axle-config-sync' ) . '</p>';
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'No items match these filters. Clear them to see every tracked item.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'Clear filters', 'axle-config-sync' ) . '</a></div>';
 			return;
 		}
 
@@ -260,15 +303,20 @@ final class View {
 		$row = $this->engine->row( $id );
 		echo '<p><a href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'Back to all items', 'axle-config-sync' ) . '</a></p>';
 		if ( ! $row ) {
-			echo '<p>' . esc_html__( 'There is no such item.', 'axle-config-sync' ) . '</p>';
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'There is no item with this ID. It may have been removed from the tracking rules.', 'axle-config-sync' ) . '</p></div>';
 			return;
 		}
 
-		echo '<h2>' . esc_html( $row['label'] ) . ' <code>' . esc_html( $row['id'] ) . '</code></h2>';
-		echo '<p>' . self::state_badge( $row['state'] ) . ' <span class="acs-file">' . esc_html( $row['file'] ) . '</span></p>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in state_badge().
+		echo '<section class="axle-card">';
+		echo '<h2 class="axle-card__title">' . esc_html( $row['label'] ) . ' <code>' . esc_html( $row['id'] ) . '</code></h2>';
+		echo '<dl class="axle-facts"><dt>' . esc_html__( 'State', 'axle-config-sync' ) . '</dt><dd>' . self::state_badge( $row['state'] ) . '</dd>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in state_badge().
+		echo '<dt>' . esc_html__( 'File', 'axle-config-sync' ) . '</dt><dd><code class="acs-file">' . esc_html( $row['file'] ) . '</code></dd></dl>';
 		$this->notes( $row );
+		echo '</section>';
 
+		echo '<section class="axle-card">';
 		$this->diff( $row, __( 'In files', 'axle-config-sync' ), __( 'On this site', 'axle-config-sync' ), $row['file_value'], $row['site_value'] );
+		echo '</section>';
 
 		if ( in_array( $row['state'], Engine::APPLY_STATES, true ) ) {
 			printf(
@@ -312,7 +360,7 @@ final class View {
 		);
 
 		if ( ! $rows ) {
-			echo '<p class="acs-empty">' . esc_html__( 'Nothing to apply: every item is in sync with its file, or only on this site.', 'axle-config-sync' ) . '</p>';
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'Nothing to apply: every item is in sync with its file, or only on this site. Items show up here when a file changes.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'See the status', 'axle-config-sync' ) . '</a></div>';
 			return;
 		}
 
@@ -320,7 +368,7 @@ final class View {
 		echo '<input type="hidden" name="page" value="' . esc_attr( Page::SLUG ) . '"><input type="hidden" name="tab" value="apply"><input type="hidden" name="step" value="preview">';
 		wp_nonce_field( 'axle_config_sync_preview', '_wpnonce', false );
 
-		echo '<p class="acs-select" role="group" aria-label="' . esc_attr__( 'Select items', 'axle-config-sync' ) . '"><span>' . esc_html__( 'Select:', 'axle-config-sync' ) . '</span> ';
+		echo '<p class="acs-select" role="group" aria-label="' . esc_attr__( 'Select items', 'axle-config-sync' ) . '"><span>' . esc_html__( 'Select', 'axle-config-sync' ) . '</span> ';
 		echo '<button type="button" class="button button-small" data-acs-select="all">' . esc_html__( 'All', 'axle-config-sync' ) . '</button> ';
 		echo '<button type="button" class="button button-small" data-acs-select="none">' . esc_html__( 'None', 'axle-config-sync' ) . '</button> ';
 		foreach ( Engine::APPLY_STATES as $state ) {
@@ -360,7 +408,7 @@ final class View {
 
 		echo '<p><a href="' . esc_url( Page::url( 'apply' ) ) . '">' . esc_html__( 'Back to the list', 'axle-config-sync' ) . '</a></p>';
 		if ( ! $ids ) {
-			echo '<p class="acs-empty">' . esc_html__( 'Pick at least one item.', 'axle-config-sync' ) . '</p>';
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'No items are picked. Go back to the list and tick the items to apply.', 'axle-config-sync' ) . '</p></div>';
 			return;
 		}
 
@@ -405,22 +453,24 @@ final class View {
 		}
 
 		if ( ! $apply ) {
-			echo '<p class="acs-empty">' . esc_html( \AryanX\Axle\ConfigSync\Messages::get( 'nothing' ) ) . '</p></form>';
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html( \AryanX\Axle\ConfigSync\Messages::get( 'nothing' ) ) . '</p></div></form>';
 			return;
 		}
 
-		echo '<div class="acs-confirm">';
+		echo '<section class="axle-card' . ( $dangerous ? ' axle-card--danger' : '' ) . ' acs-confirm">';
+		echo '<h2 class="axle-card__title">' . esc_html__( 'Apply to this site', 'axle-config-sync' ) . '</h2>';
+		echo '<p>' . esc_html__( 'Applying writes the file values to this site and replaces what is there now. You can undo it from History.', 'axle-config-sync' ) . '</p>';
 		if ( $conflicts ) {
 			echo '<p><label><input type="checkbox" name="force" value="1" required> ' . esc_html__( 'Apply the items that changed both in the files and on this site, overwriting the site values', 'axle-config-sync' ) . '</label></p>';
 		}
 		if ( $dangerous ) {
-			echo '<p class="acs-danger-confirm"><label><input type="checkbox" name="confirm_dangerous" value="1" required> ' . esc_html__( 'I have read this: apply the dangerous changes marked above', 'axle-config-sync' ) . '</label></p>';
+			echo '<p class="acs-danger-confirm"><label><input type="checkbox" name="confirm_dangerous" value="1" required> ' . esc_html__( 'I have read the dangerous changes above and want to apply them', 'axle-config-sync' ) . '</label></p>';
 		}
 		$disabled = $this->engine->frozen() ? array( 'disabled' => 'disabled' ) : array();
 		/* translators: %d: number of items. */
 		submit_button( sprintf( _n( 'Apply %d item', 'Apply %d items', count( $apply ), 'axle-config-sync' ), count( $apply ) ), 'primary', 'acs-apply', false, $disabled );
 		echo '<p class="acs-progress" role="status" aria-live="polite"></p>';
-		echo '</div></form>';
+		echo '</section></form>';
 	}
 
 	/**
@@ -434,16 +484,20 @@ final class View {
 			'skip'    => __( 'Nothing to do', 'axle-config-sync' ),
 			'blocked' => __( 'Blocked, will be skipped', 'axle-config-sync' ),
 		);
+		$tones  = array(
+			'apply'   => 'info',
+			'blocked' => 'error',
+		);
 
 		printf(
-			'<section class="acs-preview-item acs-action-%1$s" data-item="%2$s" data-warnings="%3$s" aria-labelledby="%4$s">',
+			'<section class="axle-card acs-preview-item acs-action-%1$s" data-item="%2$s" data-warnings="%3$s" aria-labelledby="%4$s">',
 			esc_attr( $row['action'] ),
 			esc_attr( $row['id'] ),
 			esc_attr( (string) wp_json_encode( $row['warnings'] ) ),
 			esc_attr( 'acs-h-' . md5( $row['id'] ) )
 		);
-		printf( '<h3 id="%1$s">%2$s <code>%3$s</code></h3>', esc_attr( 'acs-h-' . md5( $row['id'] ) ), esc_html( $row['label'] ), esc_html( $row['id'] ) );
-		echo '<p>' . self::state_badge( $row['base_state'] ) . ' <span class="acs-action">' . esc_html( $labels[ $row['action'] ] ?? '' ) . '</span>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in state_badge().
+		printf( '<h3 class="axle-card__title" id="%1$s">%2$s <code>%3$s</code></h3>', esc_attr( 'acs-h-' . md5( $row['id'] ) ), esc_html( $row['label'] ), esc_html( $row['id'] ) );
+		echo '<p>' . self::state_badge( $row['base_state'] ) . ' <span class="axle-badge axle-badge--' . esc_attr( $tones[ $row['action'] ] ?? 'neutral' ) . ' acs-action">' . esc_html( $labels[ $row['action'] ] ?? '' ) . '</span>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in state_badge().
 		if ( '' !== $row['summary'] ) {
 			echo ' <span class="acs-summary">' . esc_html( $row['summary'] ) . '</span>';
 		}
@@ -472,11 +526,15 @@ final class View {
 			echo '<div class="notice notice-warning inline"><p>' . esc_html( \AryanX\Axle\ConfigSync\Messages::get( 'not_writable', $directory->path() ) ) . '</p></div>';
 		}
 
+		if ( ! $rows ) {
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'Nothing is tracked on this site yet. Turn on a provider or add options in Track, then export.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'track' ) ) . '">' . esc_html__( 'Open Track', 'axle-config-sync' ) . '</a></div>';
+			return;
+		}
+
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" class="acs-export-form">';
 		echo '<input type="hidden" name="action" value="axle_config_sync_export">';
 		wp_nonce_field( 'axle_config_sync_export' );
 
-		echo '<p>' . esc_html__( 'Writes the live values to one JSON file per item in the config directory. Commit the directory to git. Secrets are written by name only.', 'axle-config-sync' ) . '</p>';
 		echo '<p class="acs-export-buttons">';
 		echo '<button type="submit" name="scope" value="all" class="button button-primary">' . esc_html__( 'Export all tracked items', 'axle-config-sync' ) . '</button> ';
 		echo '<button type="submit" name="scope" value="selected" class="button">' . esc_html__( 'Export selected', 'axle-config-sync' ) . '</button> ';
@@ -503,10 +561,9 @@ final class View {
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" class="acs-track-form">';
 		echo '<input type="hidden" name="action" value="axle_config_sync_track">';
 		wp_nonce_field( 'axle_config_sync_track' );
-		/* translators: %s: file name. */
-		echo '<p>' . esc_html( sprintf( __( 'These rules are saved to %s in the config directory, so they are in git and reviewed like the rest.', 'axle-config-sync' ), Rules::FILE ) ) . '</p>';
-
-		echo '<fieldset class="acs-providers"><legend>' . esc_html__( 'Providers', 'axle-config-sync' ) . '</legend>';
+		echo '<section class="axle-card"><h2 class="axle-card__title">' . esc_html__( 'Tracking rules', 'axle-config-sync' ) . '</h2>';
+		echo '<table class="form-table" role="presentation"><tbody>';
+		echo '<tr><th scope="row">' . esc_html__( 'Providers', 'axle-config-sync' ) . '</th><td><fieldset class="acs-providers"><legend class="screen-reader-text">' . esc_html__( 'Providers', 'axle-config-sync' ) . '</legend>';
 		foreach ( $this->engine->registry()->all() as $name => $provider ) {
 			printf(
 				'<label><input type="checkbox" name="providers[]" value="%1$s"%2$s> %3$s</label><br>',
@@ -515,23 +572,24 @@ final class View {
 				esc_html( $provider->title() )
 			);
 		}
-		echo '</fieldset>';
+		echo '</fieldset></td></tr>';
 
 		$lines = array();
 		foreach ( $rules['options'] as $pattern ) {
 			$lines[] = $pattern . ( isset( $rules['owners'][ $pattern ] ) ? '=' . $rules['owners'][ $pattern ] : '' );
 		}
 
-		echo '<p><label for="acs-options"><strong>' . esc_html__( 'Tracked plugin options', 'axle-config-sync' ) . '</strong></label><br>';
-		echo '<span class="description" id="acs-options-help">' . esc_html__( 'One per line: an option name or a prefix_* pattern, optionally =plugin-folder for the version check. The core settings screens are always tracked.', 'axle-config-sync' ) . '</span></p>';
+		echo '<tr><th scope="row"><label for="acs-options">' . esc_html__( 'Tracked plugin options', 'axle-config-sync' ) . '</label></th><td>';
 		echo '<textarea id="acs-options" name="options" rows="6" class="large-text code" aria-describedby="acs-options-help">' . esc_textarea( implode( "\n", $lines ) ) . '</textarea>';
+		echo '<p class="description" id="acs-options-help">' . esc_html__( 'One per line: an option name or a prefix_* pattern, optionally =plugin-folder for the version check. The core settings screens are always tracked.', 'axle-config-sync' ) . '</p></td></tr>';
 
-		echo '<p><label for="acs-not-secret"><strong>' . esc_html__( 'Not secrets', 'axle-config-sync' ) . '</strong></label><br>';
-		echo '<span class="description" id="acs-not-secret-help">' . esc_html__( 'One per line: an item ID, or item#/pointer, that looks like a secret but is not, so it is written to files as is.', 'axle-config-sync' ) . '</span></p>';
+		echo '<tr><th scope="row"><label for="acs-not-secret">' . esc_html__( 'Not secrets', 'axle-config-sync' ) . '</label></th><td>';
 		echo '<textarea id="acs-not-secret" name="not_secret" rows="3" class="large-text code" aria-describedby="acs-not-secret-help">' . esc_textarea( implode( "\n", $rules['not_secret'] ) ) . '</textarea>';
+		echo '<p class="description" id="acs-not-secret-help">' . esc_html__( 'One per line: an item ID, or item#/pointer, that looks like a secret but is not, so it is written to files as is.', 'axle-config-sync' ) . '</p></td></tr>';
+		echo '</tbody></table>';
 
 		submit_button( __( 'Save tracking rules', 'axle-config-sync' ) );
-		echo '</form>';
+		echo '</section></form>';
 
 		$this->option_picker();
 	}
@@ -548,7 +606,7 @@ final class View {
 
 		$list = OptionList::page( $search, $hidden, $paged, self::PER_PAGE );
 
-		echo '<h2>' . esc_html__( 'Find options to track', 'axle-config-sync' ) . '</h2>';
+		echo '<section class="axle-card"><h2 class="axle-card__title">' . esc_html__( 'Find options to track', 'axle-config-sync' ) . '</h2>';
 		echo '<form method="get" action="' . esc_url( admin_url( 'options-general.php' ) ) . '" class="acs-picker-search">';
 		echo '<input type="hidden" name="page" value="' . esc_attr( Page::SLUG ) . '"><input type="hidden" name="tab" value="track">';
 		echo '<label for="acs-picker-s">' . esc_html__( 'Option name contains', 'axle-config-sync' ) . '</label> ';
@@ -558,7 +616,7 @@ final class View {
 		echo '</form>';
 
 		if ( ! $list['rows'] ) {
-			echo '<p class="acs-empty">' . esc_html__( 'No options match.', 'axle-config-sync' ) . '</p>';
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'No options match this search. Try a shorter name, or show caches, counters and timestamps.', 'axle-config-sync' ) . '</p></div></section>';
 			return;
 		}
 
@@ -570,15 +628,19 @@ final class View {
 		foreach ( $list['rows'] as $option ) {
 			$tracked = $this->engine->rules()->is_tracked( $option['name'] ) || in_array( $option['name'], Options::core_names(), true );
 			$field   = 'acs-opt-' . md5( $option['name'] );
-			echo '<tr' . ( $option['size'] > 100 * KB_IN_BYTES ? ' class="acs-big"' : '' ) . '>';
+			echo '<tr>';
 			if ( $tracked ) {
 				echo '<th scope="row" class="check-column"></th>';
 			} else {
 				printf( '<th scope="row" class="check-column"><input type="checkbox" name="names[]" value="%1$s" id="%2$s"></th>', esc_attr( $option['name'] ), esc_attr( $field ) );
 			}
 			printf( '<td><label for="%1$s"><code>%2$s</code></label></td>', esc_attr( $field ), esc_html( $option['name'] ) );
-			echo '<td>' . esc_html( $option['owner'] ) . '</td><td>' . esc_html( size_format( $option['size'] ) ? (string) size_format( $option['size'] ) : '0 B' ) . '</td><td>' . esc_html( $option['autoload'] ) . '</td>';
-			echo '<td>' . ( $tracked ? esc_html__( 'Yes', 'axle-config-sync' ) : esc_html__( 'No', 'axle-config-sync' ) ) . '</td></tr>';
+			echo '<td>' . esc_html( $option['owner'] ) . '</td><td>' . esc_html( size_format( $option['size'] ) ? (string) size_format( $option['size'] ) : '0 B' );
+			if ( $option['size'] > 100 * KB_IN_BYTES ) {
+				echo ' <span class="axle-badge axle-badge--warning">' . esc_html__( 'Large', 'axle-config-sync' ) . '</span>';
+			}
+			echo '</td><td>' . esc_html( $option['autoload'] ) . '</td>';
+			echo '<td>' . ( $tracked ? '<span class="axle-badge axle-badge--good">' . esc_html__( 'Tracked', 'axle-config-sync' ) . '</span>' : '<span class="axle-badge">' . esc_html__( 'Not tracked', 'axle-config-sync' ) . '</span>' ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
 
@@ -599,7 +661,7 @@ final class View {
 		}
 
 		submit_button( __( 'Track selected options', 'axle-config-sync' ), 'secondary' );
-		echo '</form>';
+		echo '</form></section>';
 	}
 
 	/**
@@ -610,7 +672,7 @@ final class View {
 	private function history_tab( int $undo_anyway ): void {
 		$rows = $this->engine->changesets()->recent( 50 );
 		if ( ! $rows ) {
-			echo '<p class="acs-empty">' . esc_html__( 'Nothing applied yet. Each apply shows up here with an Undo button.', 'axle-config-sync' ) . '</p>';
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'Nothing applied yet. Each apply shows up here with an Undo button.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'apply' ) ) . '">' . esc_html__( 'Open Apply', 'axle-config-sync' ) . '</a></div>';
 			return;
 		}
 
@@ -618,6 +680,10 @@ final class View {
 			'applied'     => __( 'Applied', 'axle-config-sync' ),
 			'undone'      => __( 'Undone', 'axle-config-sync' ),
 			'rolled_back' => __( 'Rolled back after an error', 'axle-config-sync' ),
+		);
+		$tones    = array(
+			'applied'     => 'good',
+			'rolled_back' => 'error',
 		);
 
 		echo '<table class="widefat striped acs-history"><thead><tr>';
@@ -633,7 +699,7 @@ final class View {
 			echo '<td>' . esc_html( $user ? $user->display_name : '' ) . '</td>';
 			echo '<td>' . esc_html( $row['via'] ) . ' <span class="acs-envname">' . esc_html( $row['environment'] ) . '</span></td>';
 			echo '<td>' . esc_html( (string) $row['items_count'] ) . ' <span class="acs-item-ids">' . esc_html( implode( ', ', array_slice( $row['item_ids'], 0, 5 ) ) . ( count( $row['item_ids'] ) > 5 ? ', ...' : '' ) ) . '</span></td>';
-			echo '<td>' . esc_html( $statuses[ $row['status'] ] ?? $row['status'] ) . '</td><td>';
+			echo '<td><span class="axle-badge axle-badge--' . esc_attr( $tones[ $row['status'] ] ?? 'neutral' ) . '">' . esc_html( $statuses[ $row['status'] ] ?? $row['status'] ) . '</span></td><td>';
 			if ( 'applied' === $row['status'] ) {
 				$this->undo_button( (int) $row['id'], $undo_anyway === (int) $row['id'] );
 			}
@@ -657,7 +723,7 @@ final class View {
 		}
 		/* translators: %d: change set ID. */
 		$label = $force ? sprintf( __( 'Undo #%d anyway', 'axle-config-sync' ), $id ) : sprintf( __( 'Undo #%d', 'axle-config-sync' ), $id );
-		echo '<button type="submit" class="button' . ( $force ? ' button-link-delete' : '' ) . '">' . esc_html( $label ) . '</button></form>';
+		echo '<button type="submit" class="button' . ( $force ? ' axle-button--danger' : '' ) . '">' . esc_html( $label ) . '</button></form>';
 	}
 
 	/**
@@ -694,7 +760,7 @@ final class View {
 	private function notes( array $row ): void {
 		if ( '' !== $row['danger'] ) {
 			/* translators: %s: why the change is dangerous. */
-			echo '<p class="acs-danger"><span class="acs-badge acs-badge-danger">' . esc_html__( 'Dangerous', 'axle-config-sync' ) . '</span> ' . esc_html( $row['danger'] ) . '</p>';
+			echo '<p class="acs-danger"><span class="axle-badge axle-badge--error acs-badge-danger">' . esc_html__( 'Dangerous', 'axle-config-sync' ) . '</span> ' . esc_html( $row['danger'] ) . '</p>';
 		}
 		if ( $row['problems'] ) {
 			echo '<ul class="acs-problems">';
@@ -800,7 +866,17 @@ final class View {
 	 * @return string HTML.
 	 */
 	public static function state_badge( string $state ): string {
-		return '<span class="acs-badge acs-state-' . esc_attr( $state ) . '">' . esc_html( Engine::state_label( $state ) ) . '</span>';
+		$tones = array(
+			'in_sync'          => 'good',
+			'changed_in_files' => 'info',
+			'only_in_files'    => 'info',
+			'changed_on_site'  => 'warning',
+			'only_on_site'     => 'warning',
+			'conflict'         => 'error',
+			'blocked'          => 'error',
+		);
+
+		return '<span class="axle-badge axle-badge--' . esc_attr( $tones[ $state ] ?? 'neutral' ) . ' acs-state-' . esc_attr( $state ) . '">' . esc_html( Engine::state_label( $state ) ) . '</span>';
 	}
 
 	/**
