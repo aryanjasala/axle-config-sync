@@ -24,6 +24,13 @@
       "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
     },
     {
+      "name": "Status, no item matches the filter",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&s=zz-no-match-zz",
+      "steps": [{ "waitFor": ".acs-empty" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
       "name": "Apply: picking items",
       "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftSite" }],
       "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=apply",

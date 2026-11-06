@@ -89,7 +89,8 @@ final class Page implements Service {
 	 * Styles and the script with the wp.hooks filters.
 	 */
 	public function enqueue(): void {
-		wp_enqueue_style( 'axle-config-sync-admin', plugins_url( 'assets/admin.css', PLUGIN_FILE ), array(), VERSION );
+		AxleUi::enqueue();
+		wp_enqueue_style( 'axle-config-sync-admin', plugins_url( 'assets/admin.css', PLUGIN_FILE ), array( AxleUi::HANDLE ), VERSION );
 		wp_enqueue_script( 'axle-config-sync-admin', plugins_url( 'assets/admin.js', PLUGIN_FILE ), array( 'wp-hooks', 'wp-api-fetch', 'wp-i18n' ), VERSION, true );
 		wp_localize_script(
 			'axle-config-sync-admin',
