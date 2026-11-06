@@ -62,7 +62,7 @@ test.describe( 'Axle Config Sync', () => {
 		wp( 'option', 'update', 'blogname', 'Edited on the site' );
 		await page.goto( SCREEN );
 		await expect( statusRow( page, 'options/blogname' ) ).toContainText( 'Changed on site' );
-		await expect( page.locator( '.acs-env' ) ).toHaveText( 'production' );
+		await expect( page.locator( '.acs-env' ) ).toHaveText( 'Production' );
 
 		await preview( page, [ 'options/blogname' ] );
 		await expect( page.locator( '.acs-preview-item[data-item="options/blogname"]' ) ).toContainText( 'Will be applied' );
@@ -192,7 +192,7 @@ test.describe( 'Axle Config Sync', () => {
 
 		await preview( page, [ 'options/default_role' ] );
 		await expect( page.locator( '.acs-preview-item[data-item="options/default_role"] .acs-badge-danger' ) ).toBeVisible();
-		const box = page.getByLabel( 'I have read this: apply the dangerous changes marked above' );
+		const box = page.getByLabel( 'I have read the dangerous changes above and want to apply them' );
 		await expect( box ).toHaveAttribute( 'required', '' );
 		// The browser refuses to submit with the box unticked, before any confirmation.
 		await page.locator( '#acs-apply' ).click();
