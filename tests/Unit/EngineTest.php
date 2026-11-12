@@ -334,4 +334,85 @@ final class EngineTest extends SyncTestCase {
 	public function test_secret_markers_in_output_carry_no_fingerprint(): void {
 		$this->assertSame( array( '$secret' => 'X' ), Engine::safe_encode( Marker::secret( 'X', 'hash' ) ) );
 	}
+
+	public function test_an_item_that_cannot_be_put_back_after_a_failed_apply_is_named(): void {
+		$this->memory->store = array(
+			'a' => 'boom',
+			'b' => 'x',
+		);
+		$this->file( 'a', 'new a' );
+		$this->file( 'b', 'boom' );
+
+		$result = $this->engine->apply( array( 'memory/a', 'memory/b' ) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'axle_config_sync_failed', $result->get_error_code() );
+		$this->assertSame( array( 'memory/a' ), $result->get_error_data()['stuck'] );
+		$this->assertStringContainsString( 'could not be put back', $result->get_error_message() );
+		$this->assertStringContainsString( 'memory/a', $result->get_error_message() );
+		$this->assertStringContainsString( 'change set #1', $result->get_error_message() );
+		$this->assertSame( 'rolled_back', $this->engine->changesets()->get( 1 )['status'] );
+	}
+
+	public function test_a_failed_apply_that_rolls_back_cleanly_says_nothing_extra(): void {
+		$this->file( 'title', 'boom' );
+
+		$result = $this->engine->apply( array( 'memory/title' ) );
+
+		$this->assertSame( 'Boom.', $result->get_error_message() );
+		$this->assertSame( array(), $result->get_error_data()['stuck'] );
+		$this->assertSame( 'My site', $this->memory->store['title'] );
+	}
+
+	public function test_a_failed_undo_puts_back_what_it_already_wrote_instead_of_leaving_the_site_half_undone(): void {
+		$this->memory->store = array(
+			'a' => 'new a',
+			'b' => 'new b',
+		);
+		$id = $this->engine->changesets()->create(
+			array(
+				'memory/a' => array(
+					'before'  => 'boom',
+					'after'   => 'new a',
+					'existed' => true,
+				),
+				'memory/b' => array(
+					'before'  => 'old b',
+					'after'   => 'new b',
+					'existed' => true,
+				),
+			),
+			'cli'
+		);
+
+		$result = $this->engine->undo( $id );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'Boom.', $result->get_error_message() );
+		$this->assertSame( 'new b', $this->memory->store['b'], 'The item the undo had already restored is put back.' );
+		$this->assertSame( 'new a', $this->memory->store['a'] );
+		$this->assertSame( 'applied', $this->engine->changesets()->get( $id )['status'], 'The original change set can be tried again.' );
+	}
+
+	public function test_filtering_rows_that_are_already_computed(): void {
+		$rows = array(
+			array(
+				'id'       => 'memory/title',
+				'label'    => 'Title',
+				'provider' => 'memory',
+				'state'    => 'in_sync',
+			),
+			array(
+				'id'       => 'options/blogname',
+				'label'    => 'Site title',
+				'provider' => 'options',
+				'state'    => 'changed_on_site',
+			),
+		);
+
+		$this->assertCount( 2, Engine::filter_rows( $rows, array() ) );
+		$this->assertSame( array( 'options/blogname' ), array_column( Engine::filter_rows( $rows, array( 'provider' => 'options' ) ), 'id' ) );
+		$this->assertSame( array( 'memory/title' ), array_column( Engine::filter_rows( $rows, array( 'state' => 'in_sync' ) ), 'id' ) );
+		$this->assertSame( array( 'options/blogname' ), array_column( Engine::filter_rows( $rows, array( 'search' => 'SITE' ) ), 'id' ) );
+	}
 }

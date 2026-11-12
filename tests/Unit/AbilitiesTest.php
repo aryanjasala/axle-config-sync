@@ -8,6 +8,8 @@
 namespace AryanX\Axle\ConfigSync\Tests\Unit;
 
 use AryanX\Axle\ConfigSync\Abilities;
+use AryanX\Axle\ConfigSync\Drift;
+use AryanX\Axle\ConfigSync\Import\WpCfm;
 use Brain\Monkey\Functions;
 
 /**
@@ -40,7 +42,8 @@ final class AbilitiesTest extends SyncTestCase {
 		parent::setUp();
 		$this->memory        = new MemoryProvider();
 		$this->memory->store = array( 'acme_api_key' => 'sk_live_abcdefgh' );
-		$this->abilities     = new Abilities( $this->engine( $this->memory ) );
+		$engine              = $this->engine( $this->memory );
+		$this->abilities     = new Abilities( $engine, new Drift( $engine ), new WpCfm( $engine ) );
 
 		Functions\when( 'wp_register_ability_category' )->justReturn( true );
 		Functions\when( 'wp_register_ability' )->alias(
@@ -53,10 +56,10 @@ final class AbilitiesTest extends SyncTestCase {
 		$this->abilities->register_abilities();
 	}
 
-	public function test_seven_public_abilities_with_the_right_annotations(): void {
+	public function test_ten_public_abilities_with_the_right_annotations(): void {
 		$this->assertSame( 10, has_action( 'wp_abilities_api_init', array( $this->abilities, 'register_abilities' ) ) );
 		$this->assertSame(
-			array( 'get-status', 'get-item-diff', 'list-changesets', 'export-config', 'preview-apply', 'apply-config', 'undo-apply' ),
+			array( 'get-status', 'get-item-diff', 'list-changesets', 'export-config', 'preview-apply', 'apply-config', 'undo-apply', 'get-drift', 'preview-wp-cfm-import', 'import-wp-cfm' ),
 			array_map(
 				static function ( string $name ): string {
 					return substr( $name, strlen( 'axle-config-sync/' ) );
@@ -71,11 +74,12 @@ final class AbilitiesTest extends SyncTestCase {
 			$this->assertTrue( $args['meta']['show_in_rest'] );
 		}
 
-		foreach ( array( 'get-status', 'get-item-diff', 'list-changesets', 'preview-apply' ) as $readonly ) {
+		foreach ( array( 'get-status', 'get-item-diff', 'list-changesets', 'preview-apply', 'get-drift', 'preview-wp-cfm-import' ) as $readonly ) {
 			$this->assertTrue( $this->registered[ 'axle-config-sync/' . $readonly ]['meta']['annotations']['readonly'] );
 		}
 		$this->assertFalse( $this->registered['axle-config-sync/export-config']['meta']['annotations']['readonly'] );
 		$this->assertTrue( $this->registered['axle-config-sync/export-config']['meta']['annotations']['idempotent'] );
+		$this->assertFalse( $this->registered['axle-config-sync/import-wp-cfm']['meta']['annotations']['readonly'] );
 		$this->assertTrue( $this->registered['axle-config-sync/apply-config']['meta']['annotations']['destructive'] );
 		$this->assertTrue( $this->registered['axle-config-sync/undo-apply']['meta']['annotations']['destructive'] );
 	}

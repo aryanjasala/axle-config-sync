@@ -29,12 +29,30 @@ final class Abilities implements Service {
 	private Engine $engine;
 
 	/**
+	 * The drift watch.
+	 *
+	 * @var Drift
+	 */
+	private Drift $drift;
+
+	/**
+	 * The WP-CFM importer.
+	 *
+	 * @var Import\WpCfm
+	 */
+	private Import\WpCfm $wpcfm;
+
+	/**
 	 * Sets up the abilities.
 	 *
-	 * @param Engine $engine The engine.
+	 * @param Engine       $engine The engine.
+	 * @param Drift        $drift  The drift watch.
+	 * @param Import\WpCfm $wpcfm  The WP-CFM importer.
 	 */
-	public function __construct( Engine $engine ) {
+	public function __construct( Engine $engine, Drift $drift, Import\WpCfm $wpcfm ) {
 		$this->engine = $engine;
+		$this->drift  = $drift;
+		$this->wpcfm  = $wpcfm;
 	}
 
 	/**
@@ -361,6 +379,191 @@ final class Abilities implements Service {
 				'idempotent'  => false,
 			)
 		);
+
+		$this->ability(
+			'get-drift',
+			__( 'Get settings that drifted', 'axle-config-sync' ),
+			__( 'Settings changed on this site after their files were written, with the value in the files and on the site (secrets masked) and who changed each one, when known. Items on the expected list are left out. Changes nothing and sends nothing.', 'axle-config-sync' ),
+			array(
+				'type'                 => 'object',
+				'properties'           => new \stdClass(),
+				'additionalProperties' => false,
+				'default'              => array(),
+			),
+			array(
+				'type'       => 'object',
+				'properties' => array(
+					'checked_at' => array( 'type' => 'integer' ),
+					'count'      => array( 'type' => 'integer' ),
+					'items'      => array(
+						'type'  => 'array',
+						'items' => array(
+							'type'       => 'object',
+							'properties' => array(
+								'id'       => array( 'type' => 'string' ),
+								'label'    => array( 'type' => 'string' ),
+								'provider' => array( 'type' => 'string' ),
+								'state'    => array( 'type' => 'string' ),
+								'before'   => array( 'type' => 'string' ),
+								'after'    => array( 'type' => 'string' ),
+								'by'       => array( 'type' => 'string' ),
+								'user_id'  => array( 'type' => 'integer' ),
+								'since'    => array( 'type' => 'integer' ),
+							),
+						),
+					),
+				),
+			),
+			array( $this, 'get_drift' ),
+			$permission,
+			array(
+				'readonly'   => true,
+				'idempotent' => true,
+			)
+		);
+
+		$bundles = array(
+			'type'        => 'array',
+			'items'       => array( 'type' => 'string' ),
+			'description' => __( 'WP-CFM bundle names. Leave empty for every bundle.', 'axle-config-sync' ),
+		);
+		$plan    = array(
+			'type'       => 'object',
+			'properties' => array(
+				'bundles' => array(
+					'type'  => 'array',
+					'items' => array( 'type' => 'string' ),
+				),
+				'items'   => array(
+					'type'  => 'array',
+					'items' => array(
+						'type'       => 'object',
+						'properties' => array(
+							'bundle' => array( 'type' => 'string' ),
+							'key'    => array( 'type' => 'string' ),
+							'id'     => array( 'type' => 'string' ),
+							'action' => array(
+								'type' => 'string',
+								'enum' => array( 'new', 'replace', 'same', 'skip' ),
+							),
+							'reason' => array( 'type' => 'string' ),
+						),
+					),
+				),
+				'errors'  => array( 'type' => 'object' ),
+			),
+		);
+
+		$this->ability(
+			'preview-wp-cfm-import',
+			__( 'Preview a WP-CFM import', 'axle-config-sync' ),
+			__( 'How each item of the WP-CFM bundles would map to a Config Sync item, which files would be new or replaced, and which items cannot be mapped and why. Changes nothing.', 'axle-config-sync' ),
+			array(
+				'type'                 => 'object',
+				'properties'           => array( 'bundles' => $bundles ),
+				'additionalProperties' => false,
+				'default'              => array(),
+			),
+			$plan,
+			array( $this, 'preview_wpcfm_import' ),
+			$permission,
+			array(
+				'readonly'   => true,
+				'idempotent' => true,
+			)
+		);
+
+		$this->ability(
+			'import-wp-cfm',
+			__( 'Import WP-CFM bundles', 'axle-config-sync' ),
+			__( 'Writes Config Sync files from WP-CFM bundles. Nothing is applied to the site and the WP-CFM files are left alone. Existing Config Sync files for the same items are replaced.', 'axle-config-sync' ),
+			array(
+				'type'                 => 'object',
+				'properties'           => array( 'bundles' => $bundles ),
+				'additionalProperties' => false,
+				'default'              => array(),
+			),
+			array(
+				'type'       => 'object',
+				'properties' => array(
+					'written'   => array( 'type' => 'object' ),
+					'refused'   => array( 'type' => 'object' ),
+					'tracked'   => array(
+						'type'  => 'array',
+						'items' => array( 'type' => 'string' ),
+					),
+					'directory' => array( 'type' => 'string' ),
+				),
+			),
+			array( $this, 'import_wpcfm' ),
+			$permission,
+			array(
+				'readonly'    => false,
+				'destructive' => false,
+				'idempotent'  => true,
+			)
+		);
+	}
+
+	/**
+	 * Ability: drift.
+	 *
+	 * @return array
+	 */
+	public function get_drift(): array {
+		$items = array_values( $this->drift->items() );
+
+		return array(
+			'checked_at' => $this->drift->state()['checked_at'],
+			'count'      => count( $items ),
+			'items'      => array_map( array( Rest\Controller::class, 'drift_item' ), $items ),
+		);
+	}
+
+	/**
+	 * Ability: preview an import.
+	 *
+	 * @param array|null $input Input.
+	 * @return array
+	 */
+	public function preview_wpcfm_import( $input = null ): array {
+		$plan = $this->wpcfm->plan( $this->bundle_names( (array) $input ) );
+		unset( $plan['values'] );
+		$plan['errors'] = (object) $plan['errors'];
+
+		return $plan;
+	}
+
+	/**
+	 * Ability: import.
+	 *
+	 * @param array|null $input Input.
+	 * @return array|\WP_Error
+	 */
+	public function import_wpcfm( $input = null ) {
+		$result = $this->wpcfm->import( $this->bundle_names( (array) $input ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		return array(
+			'written'   => (object) $result['written'],
+			'refused'   => (object) $result['refused'],
+			'tracked'   => $result['tracked'],
+			'directory' => $result['directory'],
+		);
+	}
+
+	/**
+	 * Bundle names from the input, or null for every bundle.
+	 *
+	 * @param array $input Input.
+	 * @return string[]|null
+	 */
+	private function bundle_names( array $input ): ?array {
+		$names = array_values( array_filter( array_map( 'strval', (array) ( $input['bundles'] ?? array() ) ) ) );
+
+		return $names ? $names : null;
 	}
 
 	/**

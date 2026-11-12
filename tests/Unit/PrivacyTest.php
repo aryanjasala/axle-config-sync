@@ -8,6 +8,7 @@
 namespace AryanX\Axle\ConfigSync\Tests\Unit;
 
 use AryanX\Axle\ConfigSync\Changesets;
+use AryanX\Axle\ConfigSync\Drift;
 use AryanX\Axle\ConfigSync\Privacy;
 use AryanX\Axle\ConfigSync\Schema;
 use AryanX\Axle\ConfigSync\State;
@@ -33,7 +34,15 @@ final class PrivacyTest extends SyncTestCase {
 			'apply',
 			1
 		);
-		$privacy = new Privacy( $changesets, $state );
+		$drift   = new Drift( $this->engine( new MemoryProvider() ) );
+		$privacy = new Privacy( $changesets, $state, $drift );
+		$this->options[ Drift::ACTORS ] = array(
+			'options/blogname' => array(
+				'user' => 1,
+				'at'   => 1700000000,
+				'via'  => 'admin',
+			),
+		);
 		Functions\when( 'get_user_by' )->justReturn( (object) array( 'ID' => 1 ) );
 
 		$GLOBALS['wpdb']->rows[1]['created_gmt'] = '2026-10-30 10:00:00';
@@ -42,20 +51,23 @@ final class PrivacyTest extends SyncTestCase {
 
 		$export = $privacy->export( 'admin@example.com' );
 		$this->assertTrue( $export['done'] );
-		$this->assertSame( 'axle-config-sync-changeset-1', $export['data'][0]['item_id'] );
+		$items  = array_column( $export['data'], 'group_id' );
+		$this->assertContains( 'axle-config-sync-drift', $items, 'Who changed a setting is exported too.' );
+		$this->assertContains( 'axle-config-sync-changesets', $items );
 
 		$erased = $privacy->erase( 'admin@example.com' );
 		$this->assertTrue( $erased['items_retained'] );
 		$this->assertSame( 0, $GLOBALS['wpdb']->rows[1]['user_id'] );
 		$this->assertSame( 0, $state->all()['items']['options/blogname']['by'] );
 		$this->assertSame( 0, $state->all()['last_apply']['by'] );
+		$this->assertSame( 0, $this->options[ Drift::ACTORS ]['options/blogname']['user'], 'The drift record loses the user too.' );
 	}
 
 	public function test_policy_text_uses_the_retention_filter(): void {
 		Filters\expectApplied( 'axle_config_sync_retention_days' )->once()->andReturn( 7 );
 		Functions\expect( 'wp_add_privacy_policy_content' )->once()->with( 'Axle Config Sync', \Mockery::pattern( '/deleted after 7 days/' ) );
 
-		( new Privacy( new Changesets(), new State() ) )->policy_text();
+		( new Privacy( new Changesets(), new State(), new Drift( $this->engine( new MemoryProvider() ) ) ) )->policy_text();
 	}
 
 	public function test_purge_runs_daily_with_both_retention_limits(): void {

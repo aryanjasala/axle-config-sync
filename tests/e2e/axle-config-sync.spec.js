@@ -29,10 +29,11 @@ async function preview( page, ids ) {
 	await expect( page.getByRole( 'heading', { name: 'Preview' } ) ).toBeVisible();
 }
 
-/** Applies from the preview, accepting the confirmation. */
+/** Applies from the preview, through the in-place confirm step. */
 async function applyFromPreview( page ) {
-	page.once( 'dialog', ( dialog ) => dialog.accept() );
 	await page.locator( '#acs-apply' ).click();
+	await expect( page.locator( '#acs-apply-confirm' ) ).toBeVisible();
+	await page.locator( '#acs-apply-now' ).click();
 	await expect( page.locator( '.acs-notice' ) ).toBeVisible();
 }
 
@@ -71,7 +72,11 @@ test.describe( 'Axle Config Sync', () => {
 		expect( option( 'blogname' ) ).toBe( 'Bean There' );
 		expect( wp( 'db', 'query', 'SELECT via, status, items_count FROM wp_axle_config_sync_changesets WHERE id = 1', '--skip-column-names' ) ).toBe( 'admin\tapplied\t1' );
 
+		await expect( page.locator( '.acs-notice a' ) ).toHaveText( 'Undo change set #1' );
 		await page.getByRole( 'button', { name: 'Undo #1' } ).click();
+		await expect( page.locator( '#acs-undo-1' ) ).toBeFocused();
+		await expect( page.locator( '#acs-undo-1' ) ).toContainText( 'The undo is a change set too' );
+		await page.locator( '#acs-undo-1 button[type="submit"]' ).click();
 		await expect( page.locator( '.acs-notice' ) ).toContainText( 'Undid change set #1' );
 		expect( option( 'blogname' ) ).toBe( 'Edited on the site' );
 		expect( wp( 'db', 'query', 'SELECT status FROM wp_axle_config_sync_changesets WHERE id = 1', '--skip-column-names' ) ).toBe( 'undone' );
@@ -194,8 +199,9 @@ test.describe( 'Axle Config Sync', () => {
 		await expect( page.locator( '.acs-preview-item[data-item="options/default_role"] .acs-badge-danger' ) ).toBeVisible();
 		const box = page.getByLabel( 'I have read the dangerous changes above and want to apply them' );
 		await expect( box ).toHaveAttribute( 'required', '' );
-		// The browser refuses to submit with the box unticked, before any confirmation.
+		// The browser refuses to submit with the box unticked, at the confirm step.
 		await page.locator( '#acs-apply' ).click();
+		await page.locator( '#acs-apply-now' ).click();
 		await expect( page.getByRole( 'heading', { name: 'Preview' } ) ).toBeVisible();
 		expect( option( 'default_role' ) ).toBe( 'subscriber' );
 
@@ -264,6 +270,52 @@ test.describe( 'Axle Config Sync', () => {
 		expect( ids.some( ( id ) => id.startsWith( 'roles/' ) ) ).toBe( false );
 	} );
 
+	test( 'providers and not-secret marks can be set from the CLI', () => {
+		wp( 'axle-config-sync', 'export', 'blogname' );
+
+		wp( 'axle-config-sync', 'providers', 'roles', 'off' );
+		expect( readFile( 'config-sync.json' ).providers.roles ).toBe( false );
+		expect( wp( 'axle-config-sync', 'providers', '--format=csv' ) ).toContain( 'roles,Roles,off' );
+		wp( 'axle-config-sync', 'providers', 'roles', 'on' );
+		expect( readFile( 'config-sync.json' ).providers.roles ).toBe( true );
+		expect( exitCode( 'axle-config-sync', 'providers', 'nope', 'on' ) ).toBe( 1 );
+
+		wp( 'axle-config-sync', 'secrets', 'mark', 'options/acme_settings#/public_token' );
+		expect( readFile( 'config-sync.json' ).not_secret ).toContain( 'options/acme_settings#/public_token' );
+	} );
+
+	test( 'the Plugins screen links to the screen and Help has a tab for each job', async ( { page } ) => {
+		await page.goto( '/wp-admin/plugins.php' );
+		await expect( page.locator( 'tr[data-slug="axle-config-sync"] .row-actions a', { hasText: 'Open Config Sync' } ) ).toHaveAttribute( 'href', /page=axle-config-sync/ );
+
+		await page.goto( SCREEN );
+		await page.locator( '#contextual-help-link' ).click();
+		const tabs = page.locator( '#contextual-help-wrap .contextual-help-tabs li' );
+		await expect( tabs ).toHaveText( [ 'Overview', 'Status and apply', 'Drift', 'Export and import', 'Track', 'History and undo' ] );
+		await tabs.nth( 2 ).locator( 'a' ).click();
+		await expect( page.locator( '#tab-panel-axle-config-sync-drift' ) ).toContainText( 'put the files back' );
+	} );
+
+	test( 'a first visit shows the Get started card, each step done from real data, and it can be hidden', async ( { page } ) => {
+		await page.goto( SCREEN );
+		const card = page.locator( '.acs-get-started' );
+		await expect( card.locator( '.axle-step' ) ).toHaveCount( 3 );
+		await expect( card.locator( '.axle-badge--good' ) ).toHaveCount( 0 );
+
+		wp( 'axle-config-sync', 'export', 'blogname' );
+		wp( 'axle-config-sync', 'drift', '--check' );
+		await page.goto( SCREEN );
+		await expect( page.locator( '.acs-get-started' ) ).toHaveCount( 0 );
+
+		resetSync();
+		wp( 'axle-config-sync', 'export', 'blogname' );
+		await page.goto( SCREEN );
+		await expect( page.locator( '.acs-get-started .axle-badge--good' ) ).toHaveCount( 2 );
+		await page.getByRole( 'button', { name: 'Hide this card' } ).click();
+		await expect( page.locator( '.acs-get-started' ) ).toHaveCount( 0 );
+		expect( wp( 'user', 'meta', 'get', '1', 'axle_config_sync_steps_dismissed' ) ).toBe( '1' );
+	} );
+
 	test( 'the JavaScript hooks shape the preview and see the apply', async ( { page } ) => {
 		wp( 'axle-config-sync', 'export', 'blogname' );
 		wp( 'option', 'update', 'blogname', 'Changed' );
@@ -283,14 +335,10 @@ test.describe( 'Axle Config Sync', () => {
 		await expect( item.locator( '.custom-diff' ) ).toHaveText( 'options/blogname' );
 
 		await page.evaluate( () => window.wp.hooks.addFilter( 'axleConfigSync.confirmMessage', 'test', () => 'Custom confirmation' ) );
-		let message = '';
-		page.once( 'dialog', ( dialog ) => {
-			message = dialog.message();
-			dialog.accept();
-		} );
 		await page.locator( '#acs-apply' ).click();
+		await expect( page.locator( '#acs-apply-confirm-text' ) ).toHaveText( 'Custom confirmation' );
+		await page.locator( '#acs-apply-now' ).click();
 		await expect( page.locator( '.acs-notice' ) ).toContainText( 'Applied' );
-		expect( message ).toBe( 'Custom confirmation' );
 		expect( await page.evaluate( () => window.acsApplied ) ).toBe( 1 );
 		expect( option( 'blogname' ) ).toBe( 'E2E' );
 	} );

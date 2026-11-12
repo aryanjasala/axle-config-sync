@@ -454,15 +454,6 @@ final class Engine {
 			if ( 'conflict' === $row['base_state'] ) {
 				$conflicts[] = $id;
 			}
-			if ( ! empty( $filters['provider'] ) && $row['provider'] !== $filters['provider'] ) {
-				continue;
-			}
-			if ( ! empty( $filters['state'] ) && $row['state'] !== $filters['state'] ) {
-				continue;
-			}
-			if ( ! empty( $filters['search'] ) && false === stripos( $row['id'] . ' ' . $row['label'], (string) $filters['search'] ) ) {
-				continue;
-			}
 			$rows[] = $row;
 		}
 
@@ -475,7 +466,33 @@ final class Engine {
 			do_action( 'axle_config_sync_conflict_detected', $conflicts );
 		}
 
-		return $rows;
+		return self::filter_rows( $rows, $filters );
+	}
+
+	/**
+	 * Narrows rows that were already computed, so a screen that needs both the
+	 * whole list and a filtered one does the work once.
+	 *
+	 * @param array[] $rows    Rows from rows().
+	 * @param array   $filters provider, state, search.
+	 * @return array[]
+	 */
+	public static function filter_rows( array $rows, array $filters ): array {
+		return array_values(
+			array_filter(
+				$rows,
+				static function ( array $row ) use ( $filters ): bool {
+					if ( ! empty( $filters['provider'] ) && $row['provider'] !== $filters['provider'] ) {
+						return false;
+					}
+					if ( ! empty( $filters['state'] ) && $row['state'] !== $filters['state'] ) {
+						return false;
+					}
+
+					return empty( $filters['search'] ) || false !== stripos( $row['id'] . ' ' . $row['label'], (string) $filters['search'] );
+				}
+			)
+		);
 	}
 
 	/**
@@ -538,6 +555,71 @@ final class Engine {
 	}
 
 	/**
+	 * The text of an item's file for a live value: portable form, environment
+	 * values kept, secrets masked. Nothing is written.
+	 *
+	 * @param string $id   Item ID.
+	 * @param mixed  $live The value as the provider reads it from the site.
+	 * @return array{json: string, owner: string, error: string} The file text, or why there is none.
+	 */
+	public function compose_file( string $id, $live ): array {
+		$provider = $this->registry->for_item( $id );
+		$none     = array(
+			'json'  => '',
+			'owner' => '',
+			'error' => '',
+		);
+		if ( ! $provider || ! $this->allowed( $id ) ) {
+			$none['error'] = Messages::get( 'never_sync' );
+			return $none;
+		}
+
+		try {
+			$value = $this->portable( $provider, $id, $live );
+		} catch ( UnsupportedValue $e ) {
+			$none['error'] = $e->getMessage();
+			return $none;
+		}
+
+		$existing = $this->read_file( $id );
+		$value    = $this->env->protect( $id, $value, $existing['value'] ?? null, null !== $existing && '' === $existing['error'] );
+
+		/**
+		 * Filters an item's value just before it is written to its file.
+		 *
+		 * The value is in its portable form: references, placeholders and
+		 * secret markers. A secret left in plain text stops the write.
+		 *
+		 * @param mixed  $value Value.
+		 * @param string $id    Item ID.
+		 * @param mixed  $live  The live value it came from.
+		 */
+		$value = apply_filters( 'axle_config_sync_export_value', $value, $id, $live );
+
+		$leftovers = $this->secrets->find( $id, $value );
+		if ( $leftovers ) {
+			$none['error'] = Messages::get( 'secret_in_file', implode( ', ', $leftovers ) );
+			return $none;
+		}
+
+		$owner = $provider->owner( $id );
+
+		return array(
+			'json'  => Codec::to_json(
+				array(
+					'schema'   => Codec::SCHEMA,
+					'provider' => $provider->name(),
+					'id'       => $id,
+					'owner'    => $owner,
+					'value'    => Codec::encode( $value ),
+				)
+			),
+			'owner' => $owner,
+			'error' => '',
+		);
+	}
+
+	/**
 	 * Writes the live values of items to files.
 	 *
 	 * @param string[]|null $ids Item IDs, or null for every item on the site.
@@ -556,6 +638,66 @@ final class Engine {
 			$this->files = array();
 			$this->env->flush();
 		}
+	}
+
+	/**
+	 * Writes item files from values that did not come from this site's own
+	 * read, such as a WP-CFM import. The site and the saved state are not touched.
+	 *
+	 * @param array<string, mixed> $items Item ID => value, as the provider would read it.
+	 * @return array{written: array<string, string>, refused: array<string, string>, directory: string}|\WP_Error
+	 */
+	public function write_imported( array $items ) {
+		if ( ! $this->directory->ensure() ) {
+			return new \WP_Error( 'axle_config_sync_not_writable', Messages::get( 'not_writable', $this->directory->path() ), array( 'status' => 500 ) );
+		}
+
+		$written = array();
+		$refused = array();
+		$owners  = array();
+		foreach ( $items as $id => $value ) {
+			$id       = (string) $id;
+			$provider = $this->registry->for_item( $id );
+			$compose  = $this->compose_file( $id, $value );
+			if ( ! $provider || '' !== $compose['error'] ) {
+				$refused[ $id ] = '' !== $compose['error'] ? $compose['error'] : Messages::get( 'never_sync' );
+				continue;
+			}
+			if ( ! $this->directory->write( $provider->file( $id ), $compose['json'] ) ) {
+				$refused[ $id ] = Messages::get( 'not_writable', $this->directory->path() );
+				continue;
+			}
+			$written[ $id ] = $provider->file( $id );
+			$owners[]       = $compose['owner'];
+			unset( $this->files[ $id ] );
+		}
+
+		$this->write_manifest( $owners );
+		if ( null === $this->directory->read( Rules::FILE ) ) {
+			$this->rules->write_file();
+		}
+
+		return array(
+			'written'   => $written,
+			'refused'   => $refused,
+			'directory' => $this->directory->path(),
+		);
+	}
+
+	/**
+	 * Writes one item through its provider without the drift watch counting
+	 * it as someone else's change.
+	 *
+	 * @param Provider $provider Provider.
+	 * @param string   $id       Item ID.
+	 * @param mixed    $value    Value, or null to remove.
+	 */
+	private function write_item( Provider $provider, string $id, $value ): void {
+		Drift::silently(
+			static function () use ( $provider, $id, $value ): void {
+				$provider->write( $id, $value );
+			}
+		);
 	}
 
 	/**
@@ -795,12 +937,32 @@ final class Engine {
 		$new_id = $this->changesets->create( $items, $via, $changeset_id );
 
 		// Undo in reverse apply order, so widgets let go of menus before menus go.
+		$done = array();
 		foreach ( array_reverse( $this->registry->sort( array_keys( $plan ) ) ) as $id ) {
 			try {
-				$plan[ $id ]['provider']->write( $id, $plan[ $id ]['target'] );
+				$this->write_item( $plan[ $id ]['provider'], $id, $plan[ $id ]['target'] );
+				$done[] = $id;
 			} catch ( \Throwable $e ) {
+				// Put back what the undo already wrote, so the site is not left half undone.
+				$stuck = array();
+				foreach ( array_reverse( $done ) as $written ) {
+					try {
+						$this->write_item( $plan[ $written ]['provider'], $written, $plan[ $written ]['live'] );
+					} catch ( \Throwable $ignored ) {
+						$stuck[] = $written;
+						unset( $ignored );
+					}
+				}
 				$this->changesets->update( $new_id, null, 'rolled_back' );
-				return new \WP_Error( 'axle_config_sync_failed', $e->getMessage(), array( 'status' => 500 ) );
+
+				return new \WP_Error(
+					'axle_config_sync_failed',
+					$stuck ? $e->getMessage() . ' ' . Messages::get( 'rollback_stuck', implode( ', ', $stuck ), $new_id ) : $e->getMessage(),
+					array(
+						'status' => 500,
+						'stuck'  => $stuck,
+					)
+				);
 			}
 		}
 
@@ -906,45 +1068,16 @@ final class Engine {
 				continue;
 			}
 
-			$live = $provider->read( $id );
-			try {
-				$value = $this->portable( $provider, $id, $live );
-			} catch ( UnsupportedValue $e ) {
-				$refused[ $id ] = $e->getMessage();
+			$live    = $provider->read( $id );
+			$compose = $this->compose_file( $id, $live );
+			if ( '' !== $compose['error'] ) {
+				$refused[ $id ] = $compose['error'];
 				continue;
 			}
 
-			$existing = $this->read_file( $id );
-			$value    = $this->env->protect( $id, $value, $existing['value'] ?? null, null !== $existing && '' === $existing['error'] );
+			$owner = $compose['owner'];
 
-			/**
-			 * Filters an item's value just before it is written to its file.
-			 *
-			 * The value is in its portable form: references, placeholders and
-			 * secret markers. A secret left in plain text stops the write.
-			 *
-			 * @param mixed  $value Value.
-			 * @param string $id    Item ID.
-			 * @param mixed  $live  The live value it came from.
-			 */
-			$value = apply_filters( 'axle_config_sync_export_value', $value, $id, $live );
-
-			$leftovers = $this->secrets->find( $id, $value );
-			if ( $leftovers ) {
-				$refused[ $id ] = Messages::get( 'secret_in_file', implode( ', ', $leftovers ) );
-				continue;
-			}
-
-			$owner = $provider->owner( $id );
-			$data  = array(
-				'schema'   => Codec::SCHEMA,
-				'provider' => $provider->name(),
-				'id'       => $id,
-				'owner'    => $owner,
-				'value'    => Codec::encode( $value ),
-			);
-
-			if ( ! $this->directory->write( $provider->file( $id ), Codec::to_json( $data ) ) ) {
+			if ( ! $this->directory->write( $provider->file( $id ), $compose['json'] ) ) {
 				$refused[ $id ] = Messages::get( 'not_writable', $this->directory->path() );
 				continue;
 			}
@@ -1134,7 +1267,7 @@ final class Engine {
 
 				$items[ $id ]['before']  = self::safe_encode( $row['live'] );
 				$items[ $id ]['existed'] = (bool) $row['on_site'];
-				$provider->write( $id, $row['resolved'] );
+				$this->write_item( $provider, $id, $row['resolved'] );
 				$written[] = $id;
 
 				$readback = $provider->exists( $id ) ? $provider->read( $id ) : null;
@@ -1156,20 +1289,29 @@ final class Engine {
 				do_action( 'axle_config_sync_item_applied', $id, $row['live'], $readback );
 			}
 		} catch ( \Throwable $e ) {
+			$stuck = array();
 			foreach ( array_reverse( $written ) as $id ) {
 				$provider = $this->registry->for_item( $id );
 				try {
 					if ( $provider ) {
-						$provider->write( $id, empty( $items[ $id ]['existed'] ) ? null : Codec::decode( $items[ $id ]['before'] ) );
+						$this->write_item( $provider, $id, empty( $items[ $id ]['existed'] ) ? null : Codec::decode( $items[ $id ]['before'] ) );
 					}
 				} catch ( \Throwable $ignored ) {
-					// Keep rolling back the rest.
+					// Keep rolling back the rest, and tell the person which ones did not go back.
+					$stuck[] = $id;
 					unset( $ignored );
 				}
 			}
 
 			$this->changesets->update( $changeset_id, $items, 'rolled_back' );
-			$error = new \WP_Error( 'axle_config_sync_failed', $e->getMessage(), array( 'status' => 500 ) );
+			$error = new \WP_Error(
+				'axle_config_sync_failed',
+				$stuck ? $e->getMessage() . ' ' . Messages::get( 'rollback_stuck', implode( ', ', $stuck ), $changeset_id ) : $e->getMessage(),
+				array(
+					'status' => 500,
+					'stuck'  => $stuck,
+				)
+			);
 
 			/**
 			 * Fires after a failed apply was rolled back.

@@ -34,14 +34,23 @@ final class Privacy implements Service {
 	private State $state;
 
 	/**
+	 * The drift watch.
+	 *
+	 * @var Drift
+	 */
+	private Drift $drift;
+
+	/**
 	 * Sets up the privacy tools.
 	 *
 	 * @param Changesets $changesets Change sets.
 	 * @param State      $state      Sync state.
+	 * @param Drift      $drift      The drift watch.
 	 */
-	public function __construct( Changesets $changesets, State $state ) {
+	public function __construct( Changesets $changesets, State $state, Drift $drift ) {
 		$this->changesets = $changesets;
 		$this->state      = $state;
+		$this->drift      = $drift;
 	}
 
 	/**
@@ -62,7 +71,7 @@ final class Privacy implements Service {
 	public function add_exporter( $exporters ): array {
 		$exporters             = (array) $exporters;
 		$exporters[ self::ID ] = array(
-			'exporter_friendly_name' => __( 'Config Sync change sets', 'axle-config-sync' ),
+			'exporter_friendly_name' => __( 'Config Sync change sets and drift records', 'axle-config-sync' ),
 			'callback'               => array( $this, 'export' ),
 		);
 
@@ -78,7 +87,7 @@ final class Privacy implements Service {
 	public function add_eraser( $erasers ): array {
 		$erasers             = (array) $erasers;
 		$erasers[ self::ID ] = array(
-			'eraser_friendly_name' => __( 'Config Sync change sets', 'axle-config-sync' ),
+			'eraser_friendly_name' => __( 'Config Sync change sets and drift records', 'axle-config-sync' ),
 			'callback'             => array( $this, 'erase' ),
 		);
 
@@ -100,6 +109,29 @@ final class Privacy implements Service {
 		if ( $user ) {
 			$rows = $this->changesets->for_user( (int) $user->ID, max( 1, (int) $page ), self::PER );
 			$done = count( $rows ) < self::PER;
+			if ( 1 === max( 1, (int) $page ) ) {
+				foreach ( $this->drift->records_for_user( (int) $user->ID ) as $id => $record ) {
+					$data[] = array(
+						'group_id'    => 'axle-config-sync-drift',
+						'group_label' => __( 'Config Sync drift records', 'axle-config-sync' ),
+						'item_id'     => 'axle-config-sync-drift-' . md5( $id ),
+						'data'        => array(
+							array(
+								'name'  => __( 'Setting', 'axle-config-sync' ),
+								'value' => $id,
+							),
+							array(
+								'name'  => __( 'Changed (UTC)', 'axle-config-sync' ),
+								'value' => gmdate( 'Y-m-d H:i:s', (int) $record['at'] ),
+							),
+							array(
+								'name'  => __( 'Source', 'axle-config-sync' ),
+								'value' => (string) $record['via'],
+							),
+						),
+					);
+				}
+			}
 			foreach ( $rows as $row ) {
 				$data[] = array(
 					'group_id'    => 'axle-config-sync-changesets',
@@ -147,7 +179,7 @@ final class Privacy implements Service {
 		$user    = get_user_by( 'email', (string) $email );
 		$changed = 0;
 		if ( $user ) {
-			$changed = $this->changesets->anonymize_user( (int) $user->ID ) + $this->state->forget_user( (int) $user->ID );
+			$changed = $this->changesets->anonymize_user( (int) $user->ID ) + $this->state->forget_user( (int) $user->ID ) + $this->drift->forget_user( (int) $user->ID );
 		}
 
 		return array(
@@ -168,7 +200,7 @@ final class Privacy implements Service {
 
 		$text = sprintf(
 			/* translators: %d: number of days. */
-			__( 'When an administrator exports or applies site settings with Axle Config Sync, the site records who did it and when, so the change can be reviewed and undone. These records are deleted after %d days. Settings files may contain the site admin email address; it is not sent anywhere by this plugin.', 'axle-config-sync' ),
+			__( 'When an administrator exports or applies site settings with Axle Config Sync, the site records who did it and when, so the change can be reviewed and undone. These records are deleted after %d days. When a tracked setting is changed, the site also keeps the user ID and the time of the change, so the drift watch can say who changed it. These records are deleted after the same number of days once the setting no longer differs from its file. Settings files may contain the site admin email address. If you turn on the drift email or webhook, the changed settings are sent to the address or server you set, with secrets masked.', 'axle-config-sync' ),
 			Settings::retention_days()
 		);
 

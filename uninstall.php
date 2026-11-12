@@ -16,6 +16,9 @@ function axle_config_sync_uninstall_site(): void {
 	global $wpdb;
 
 	wp_clear_scheduled_hook( 'axle_config_sync_purge' );
+	wp_clear_scheduled_hook( 'axle_config_sync_drift_check' );
+	delete_option( 'axle_config_sync_drift' );
+	delete_option( 'axle_config_sync_drift_actors' );
 	delete_option( 'axle_config_sync_settings' );
 	delete_option( 'axle_config_sync_state' );
 	delete_option( 'axle_config_sync_db_version' );
@@ -28,6 +31,10 @@ function axle_config_sync_uninstall_site(): void {
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- Removing the plugin's own table on uninstall.
 	$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $wpdb->prefix . 'axle_config_sync_changesets' ) );
 }
+
+// Per-user dismissals (the drift notice and the Get started card), on every site.
+delete_metadata( 'user', 0, 'axle_config_sync_drift_seen', '', true );
+delete_metadata( 'user', 0, 'axle_config_sync_steps_dismissed', '', true );
 
 if ( is_multisite() ) {
 	$axle_config_sync_offset = 0;

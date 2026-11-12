@@ -73,6 +73,8 @@ final class Messages {
 			'conflict'           => __( 'These items changed both in the files and on this site since the last sync: %s. Apply them anyway with force.', 'axle-config-sync' ),
 			/* translators: %s: item IDs. */
 			'dangerous'          => __( 'These items are dangerous changes: %s. Confirm you read them (or pass --allow-dangerous / allow_dangerous) to apply them.', 'axle-config-sync' ),
+			/* translators: 1: item IDs, 2: change set ID. */
+			'rollback_stuck'     => __( 'These items could not be put back and may hold the new value: %1$s. The values from before are kept in change set #%2$d.', 'axle-config-sync' ),
 			'nothing'            => __( 'Nothing to apply: the chosen items are in sync or blocked.', 'axle-config-sync' ),
 			/* translators: %s: item IDs. */
 			'changed_since'      => __( 'These items changed after this apply, so undoing would overwrite newer changes: %s. Use "Undo anyway" to undo them.', 'axle-config-sync' ),

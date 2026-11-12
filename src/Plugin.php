@@ -8,9 +8,12 @@
 namespace AryanX\Axle\ConfigSync;
 
 use AryanX\Axle\ConfigSync\Admin\Page;
+use AryanX\Axle\ConfigSync\Admin\DriftNotice;
 use AryanX\Axle\ConfigSync\Cli\Command;
+use AryanX\Axle\ConfigSync\Cli\ImportCommand;
 use AryanX\Axle\ConfigSync\Cli\SecretsCommand;
 use AryanX\Axle\ConfigSync\Health\SiteHealth;
+use AryanX\Axle\ConfigSync\Import\WpCfm;
 use AryanX\Axle\ConfigSync\Rest\Controller;
 
 defined( 'ABSPATH' ) || exit;
@@ -42,6 +45,20 @@ final class Plugin {
 	private Changesets $changesets;
 
 	/**
+	 * The drift watch.
+	 *
+	 * @var Drift
+	 */
+	private Drift $drift;
+
+	/**
+	 * The WP-CFM importer.
+	 *
+	 * @var WpCfm
+	 */
+	private WpCfm $wpcfm;
+
+	/**
 	 * Starts the plugin. Runs on `plugins_loaded`.
 	 */
 	public static function boot(): void {
@@ -68,6 +85,8 @@ final class Plugin {
 		$rules            = new Rules( $directory );
 		$this->changesets = new Changesets();
 		$this->engine     = new Engine( $directory, $rules, new State(), $this->changesets, new Registry( $rules ) );
+		$this->drift      = new Drift( $this->engine );
+		$this->wpcfm      = new WpCfm( $this->engine );
 	}
 
 	/**
@@ -80,6 +99,24 @@ final class Plugin {
 	}
 
 	/**
+	 * The drift watch.
+	 *
+	 * @return Drift
+	 */
+	public function drift(): Drift {
+		return $this->drift;
+	}
+
+	/**
+	 * The WP-CFM importer.
+	 *
+	 * @return WpCfm
+	 */
+	public function wpcfm(): WpCfm {
+		return $this->wpcfm;
+	}
+
+	/**
 	 * Registers the services.
 	 */
 	private function register(): void {
@@ -87,11 +124,13 @@ final class Plugin {
 
 		$services = array(
 			$this->changesets,
-			new Page( $this->engine ),
-			new Controller( $this->engine ),
-			new Abilities( $this->engine ),
-			new SiteHealth( $this->engine ),
-			new Privacy( $this->changesets, $this->engine->state() ),
+			$this->drift,
+			new Page( $this->engine, $this->drift, $this->wpcfm ),
+			new DriftNotice( $this->drift ),
+			new Controller( $this->engine, $this->drift ),
+			new Abilities( $this->engine, $this->drift, $this->wpcfm ),
+			new SiteHealth( $this->engine, $this->drift ),
+			new Privacy( $this->changesets, $this->engine->state(), $this->drift ),
 		);
 
 		foreach ( $services as $service ) {
@@ -99,7 +138,8 @@ final class Plugin {
 		}
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
-			\WP_CLI::add_command( 'axle-config-sync', new Command( $this->engine ) );
+			\WP_CLI::add_command( 'axle-config-sync', new Command( $this->engine, $this->drift ) );
+			\WP_CLI::add_command( 'axle-config-sync import', new ImportCommand( $this->wpcfm ) );
 			\WP_CLI::add_command( 'axle-config-sync secrets', new SecretsCommand( $this->engine ) );
 		}
 	}
