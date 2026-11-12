@@ -13,7 +13,14 @@ use AryanX\Axle\ConfigSync\Providers\Base;
  * Items are keys in an array. Writing `boom` throws, to test rollback;
  * writing `sanitize me` stores it upper case, to test "applied with changes".
  */
-final class MemoryProvider extends Base {
+class MemoryProvider extends Base {
+
+	/**
+	 * The provider name, `memory` unless a test needs another.
+	 *
+	 * @var string
+	 */
+	public string $providerName = 'memory';
 
 	/**
 	 * Live values by key.
@@ -29,8 +36,15 @@ final class MemoryProvider extends Base {
 	 */
 	public array $writes = array();
 
+	/**
+	 * Called on every write, for tests that watch what happens during one.
+	 *
+	 * @var callable|null
+	 */
+	public $onWrite = null;
+
 	public function name(): string {
-		return 'memory';
+		return $this->providerName;
 	}
 
 	public function title(): string {
@@ -39,8 +53,8 @@ final class MemoryProvider extends Base {
 
 	public function items(): array {
 		return array_map(
-			static function ( $key ) {
-				return 'memory/' . $key;
+			function ( $key ) {
+				return $this->providerName . '/' . $key;
 			},
 			array_keys( $this->store )
 		);
@@ -57,6 +71,9 @@ final class MemoryProvider extends Base {
 	public function write( string $id, $value ): void {
 		if ( 'boom' === $value ) {
 			throw new \RuntimeException( 'Boom.' );
+		}
+		if ( null !== $this->onWrite ) {
+			( $this->onWrite )();
 		}
 		$this->writes[] = $this->key( $id );
 		if ( null === $value ) {

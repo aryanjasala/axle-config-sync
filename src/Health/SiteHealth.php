@@ -8,15 +8,17 @@
 namespace AryanX\Axle\ConfigSync\Health;
 
 use AryanX\Axle\ConfigSync\Admin\Page;
+use AryanX\Axle\ConfigSync\Directory;
+use AryanX\Axle\ConfigSync\Drift;
 use AryanX\Axle\ConfigSync\Engine;
 use AryanX\Axle\ConfigSync\Service;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Three tests under Tools > Site Health: the config directory is served over
- * HTTP (critical), secrets are in the files (critical), and items conflict
- * (recommended).
+ * Four tests under Tools > Site Health: the config directory is served over
+ * HTTP (critical), secrets are in the files (critical), items conflict
+ * (recommended), and settings drifted from the files (recommended).
  */
 final class SiteHealth implements Service {
 
@@ -28,12 +30,21 @@ final class SiteHealth implements Service {
 	private Engine $engine;
 
 	/**
+	 * The drift watch.
+	 *
+	 * @var Drift
+	 */
+	private Drift $drift;
+
+	/**
 	 * Sets up the tests.
 	 *
 	 * @param Engine $engine The engine.
+	 * @param Drift  $drift  The drift watch.
 	 */
-	public function __construct( Engine $engine ) {
+	public function __construct( Engine $engine, Drift $drift ) {
 		$this->engine = $engine;
+		$this->drift  = $drift;
 	}
 
 	/**
@@ -59,6 +70,10 @@ final class SiteHealth implements Service {
 			'label' => __( 'No secrets in Config Sync files', 'axle-config-sync' ),
 			'test'  => array( $this, 'test_secrets' ),
 		);
+		$tests['direct']['axle_config_sync_drift']   = array(
+			'label' => __( 'No Config Sync drift', 'axle-config-sync' ),
+			'test'  => array( $this, 'test_drift' ),
+		);
 		$tests['direct']['axle_config_sync_conflicts'] = array(
 			'label' => __( 'No Config Sync conflicts', 'axle-config-sync' ),
 			'test'  => array( $this, 'test_conflicts' ),
@@ -80,7 +95,16 @@ final class SiteHealth implements Service {
 			return $this->result(
 				'critical',
 				__( 'Config Sync files can be downloaded by anyone', 'axle-config-sync' ),
-				'<p>' . esc_html__( 'The web server hands out files from the config directory, which hold site settings. Add this rule to the nginx site config, or move the directory outside the web root with AXLE_CONFIG_SYNC_DIR:', 'axle-config-sync' ) . '</p><pre>' . esc_html( $directory->nginx_rule() ) . '</pre>',
+				'<p>' . esc_html__( 'The web server hands out files from the config directory, which hold site settings. Add this rule to the nginx site config and reload nginx, or move the directory outside the web root with AXLE_CONFIG_SYNC_DIR:', 'axle-config-sync' ) . '</p><pre>' . esc_html( $directory->nginx_rule() ) . '</pre>',
+				'axle_config_sync_served'
+			);
+		}
+
+		if ( 'unknown' === $result && Directory::ignores_htaccess() ) {
+			return $this->result(
+				'recommended',
+				__( 'Config Sync files may be served', 'axle-config-sync' ),
+				'<p>' . esc_html__( 'This site runs on nginx, which ignores the .htaccess file Config Sync wrote, and the check request did not get through. Add this rule to the nginx site config, reload nginx, then run the check again, or move the directory outside the web root with AXLE_CONFIG_SYNC_DIR:', 'axle-config-sync' ) . '</p><pre>' . esc_html( $directory->nginx_rule() ) . '</pre>',
 				'axle_config_sync_served'
 			);
 		}
@@ -88,7 +112,7 @@ final class SiteHealth implements Service {
 		return $this->result(
 			'good',
 			__( 'Config Sync files are not served', 'axle-config-sync' ),
-			'<p>' . esc_html( 'unknown' === $result ? __( 'The check request did not get through, so this could not be confirmed. If the site runs on nginx, make sure the config directory is denied.', 'axle-config-sync' ) : __( 'The config directory is outside the web root or the web server refuses it.', 'axle-config-sync' ) ) . '</p>',
+			'<p>' . esc_html( 'unknown' === $result ? __( 'The check request did not get through, so this could not be confirmed. Apache follows the .htaccess deny; on other servers, make sure the config directory is denied.', 'axle-config-sync' ) : __( 'The config directory is outside the web root or the web server refuses it.', 'axle-config-sync' ) ) . '</p>',
 			'axle_config_sync_served'
 		);
 	}
@@ -148,24 +172,67 @@ final class SiteHealth implements Service {
 	}
 
 	/**
+	 * Whether settings changed on the site after their files were written.
+	 * Reads what the last check stored, so the test is cheap.
+	 *
+	 * @return array
+	 */
+	public function test_drift(): array {
+		$state = $this->drift->state();
+		$ids   = array_keys( $state['items'] );
+
+		if ( $ids ) {
+			return $this->result(
+				'recommended',
+				__( 'Config Sync found settings that drifted from the files', 'axle-config-sync' ),
+				'<p>' . esc_html(
+					sprintf(
+						/* translators: %s: item IDs. */
+						__( 'These settings were changed on this site after their files were written, so the next deploy from the files would overwrite them: %s. Keep the live values in the files, or put the files back.', 'axle-config-sync' ),
+						implode( ', ', array_slice( $ids, 0, 20 ) ) . ( count( $ids ) > 20 ? ', ...' : '' )
+					)
+				) . '</p>',
+				'axle_config_sync_drift',
+				Page::url( 'drift' ),
+				__( 'Review the drift', 'axle-config-sync' )
+			);
+		}
+
+		if ( 0 === $state['checked_at'] ) {
+			return $this->result(
+				'good',
+				__( 'No Config Sync drift', 'axle-config-sync' ),
+				'<p>' . esc_html__( 'The daily drift check has not run yet. Run it from Settings > Config Sync > Drift, or with wp axle-config-sync drift --check.', 'axle-config-sync' ) . '</p>',
+				'axle_config_sync_drift',
+				Page::url( 'drift' ),
+				__( 'Open Drift', 'axle-config-sync' )
+			);
+		}
+
+		return $this->result( 'good', __( 'No Config Sync drift', 'axle-config-sync' ), '<p>' . esc_html__( 'No tracked setting changed on this site after its file was written, as of the last check.', 'axle-config-sync' ) . '</p>', 'axle_config_sync_drift', Page::url( 'drift' ), __( 'Open Drift', 'axle-config-sync' ) );
+	}
+
+	/**
 	 * A Site Health result.
 	 *
 	 * @param string $status      good, recommended or critical.
 	 * @param string $label       Label.
 	 * @param string $description HTML.
 	 * @param string $test        Test name.
+	 * @param string $url         Link target, or empty for the screen.
+	 * @param string $link        Link text, or empty.
 	 * @return array
 	 */
-	private function result( string $status, string $label, string $description, string $test ): array {
+	private function result( string $status, string $label, string $description, string $test, string $url = '', string $link = '' ): array {
 		return array(
 			'label'       => $label,
 			'status'      => $status,
 			'badge'       => array(
-				'label' => __( 'Security', 'axle-config-sync' ),
+				'label' => 'axle_config_sync_drift' === $test || 'axle_config_sync_conflicts' === $test ? __( 'Configuration', 'axle-config-sync' ) : __( 'Security', 'axle-config-sync' ),
 				'color' => 'good' === $status ? 'blue' : 'red',
 			),
 			'description' => $description,
-			'actions'     => sprintf( '<a href="%s">%s</a>', esc_url( Page::url() ), esc_html__( 'Open Config Sync', 'axle-config-sync' ) ),
+			'actions'     => sprintf( '<a href="%s">%s</a>', esc_url( '' !== $url ? $url : Page::url() ), '' !== $link ? esc_html( $link ) : esc_html__( 'Open Config Sync', 'axle-config-sync' ) ),
 			'test'        => $test,
 		);
 	}

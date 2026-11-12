@@ -7,6 +7,7 @@
 
 namespace AryanX\Axle\ConfigSync\Rest;
 
+use AryanX\Axle\ConfigSync\Drift;
 use AryanX\Axle\ConfigSync\Engine;
 use AryanX\Axle\ConfigSync\Environment;
 use AryanX\Axle\ConfigSync\Service;
@@ -18,6 +19,7 @@ defined( 'ABSPATH' ) || exit;
  * `axle-config-sync/v1`:
  *
  * - GET  /status           the same as the Status tab
+ * - GET  /drift            settings changed on the site after their files were written
  * - POST /apply            apply items; the screen sends more than the batch size in chunks, with `changeset` to continue one change set
  * - POST /undo/<id>        undo a change set
  *
@@ -35,12 +37,21 @@ final class Controller implements Service {
 	private Engine $engine;
 
 	/**
+	 * The drift watch.
+	 *
+	 * @var Drift
+	 */
+	private Drift $drift;
+
+	/**
 	 * Sets up the routes.
 	 *
 	 * @param Engine $engine The engine.
+	 * @param Drift  $drift  The drift watch.
 	 */
-	public function __construct( Engine $engine ) {
+	public function __construct( Engine $engine, Drift $drift ) {
 		$this->engine = $engine;
+		$this->drift  = $drift;
 	}
 
 	/**
@@ -64,6 +75,16 @@ final class Controller implements Service {
 			array(
 				'methods'             => 'GET',
 				'callback'            => array( $this, 'status' ),
+				'permission_callback' => $permission,
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/drift',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( $this, 'drift' ),
 				'permission_callback' => $permission,
 			)
 		);
@@ -139,6 +160,45 @@ final class Controller implements Service {
 				'counts'      => Engine::counts( $rows ),
 				'items'       => array_map( array( Engine::class, 'public_row' ), $rows ),
 			)
+		);
+	}
+
+	/**
+	 * GET /drift.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	public function drift(): \WP_REST_Response {
+		$items = array_values( $this->drift->items() );
+
+		return rest_ensure_response(
+			array(
+				'checked_at' => $this->drift->state()['checked_at'],
+				'count'      => count( $items ),
+				'items'      => array_map( array( self::class, 'drift_item' ), $items ),
+			)
+		);
+	}
+
+	/**
+	 * A drifted item for output. Values come masked from the engine.
+	 *
+	 * @param array $item Drifted item.
+	 * @return array
+	 */
+	public static function drift_item( array $item ): array {
+		$who = $item['who'];
+
+		return array(
+			'id'       => $item['id'],
+			'label'    => $item['label'],
+			'provider' => $item['provider'],
+			'state'    => $item['state'],
+			'before'   => $item['before'],
+			'after'    => $item['after'],
+			'by'       => $who ? Drift::who_label( $who ) : '',
+			'user_id'  => $who ? (int) $who['user_id'] : 0,
+			'since'    => (int) $item['since'],
 		);
 	}
 

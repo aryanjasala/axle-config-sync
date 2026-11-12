@@ -31,9 +31,11 @@ test( 'demo: a setting changed in git is previewed, applied and undone', async (
 
 			// Apply, then undo from History.
 			await demo.click( page.locator( '#acs-apply' ), 300 );
+			await demo.click( page.locator( '#acs-apply-now' ), 300 );
 			await expect( page.locator( '.acs-notice' ) ).toContainText( 'Applied' );
 			await demo.pause( 2000 );
-			await demo.click( page.locator( '.acs-undo-form button' ).first(), 300 );
+			await demo.click( page.locator( '.acs-undo-form [data-acs-reveal]' ).first(), 300 );
+			await demo.click( page.locator( '.acs-undo-form button[type="submit"]' ).first(), 300 );
 			await expect( page.locator( '.acs-notice' ) ).toContainText( 'Undid' );
 			await demo.pause( 2500 );
 		} );

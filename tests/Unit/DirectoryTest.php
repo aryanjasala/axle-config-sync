@@ -65,13 +65,57 @@ final class DirectoryTest extends SyncTestCase {
 		Filters\expectApplied( 'axle_config_sync_directory' )->atLeast()->once()->andReturn( $inside );
 		Functions\when( 'wp_generate_password' )->justReturn( 'token123' );
 		Functions\when( 'delete_transient' )->justReturn( true );
-		Filters\expectApplied( 'axle_config_sync_probe_url' )->once()->with( 'https://example.test/wp-content/' . basename( $inside ) . '/reachability-check.txt' )->andReturn( 'http://localhost/probe' );
+		Filters\expectApplied( 'axle_config_sync_probe_url' )->once()->with( 'https://example.test/wp-content/' . basename( $inside ) . '/reachability-check.json' )->andReturn( 'http://localhost/probe' );
 		Functions\expect( 'wp_remote_get' )->once()->with( 'http://localhost/probe', \Mockery::type( 'array' ) )->andReturn( array( 'body' => 'token123' ) );
 		Functions\when( 'wp_remote_retrieve_response_code' )->justReturn( 200 );
 		Functions\when( 'wp_remote_retrieve_body' )->justReturn( 'token123' );
 
 		$this->assertSame( 'reachable', ( new Directory() )->reachability( true ) );
-		$this->assertFileDoesNotExist( $inside . '/reachability-check.txt', 'The probe file is removed again.' );
+		$this->assertFileDoesNotExist( $inside . '/reachability-check.json', 'The probe file is removed again.' );
 		$this->remove( $inside );
+	}
+
+	public function test_the_nginx_rule_on_multisite_covers_the_base_folder_not_one_site(): void {
+		Functions\when( 'is_multisite' )->justReturn( true );
+		Functions\when( 'get_current_blog_id' )->justReturn( 3 );
+
+		$rule = ( new Directory() )->nginx_rule();
+
+		$this->assertStringContainsString( 'location ^~ /wp-content/axle-config/ {', $rule );
+		$this->assertStringNotContainsString( 'sites/3', $rule );
+	}
+
+	public function test_nginx_is_detected_from_the_server_software_and_ignores_htaccess(): void {
+		unset( $_SERVER['SERVER_SOFTWARE'] );
+		Functions\when( 'wp_unslash' )->returnArg();
+		$this->assertSame( 'unknown', Directory::server() );
+		$this->assertFalse( Directory::ignores_htaccess() );
+
+		$_SERVER['SERVER_SOFTWARE'] = 'nginx/1.27.2';
+		$this->assertSame( 'nginx', Directory::server() );
+		$this->assertTrue( Directory::ignores_htaccess() );
+
+		$_SERVER['SERVER_SOFTWARE'] = 'Apache/2.4.62 (Debian)';
+		$this->assertSame( 'apache', Directory::server() );
+		$this->assertFalse( Directory::ignores_htaccess() );
+
+		$_SERVER['SERVER_SOFTWARE'] = 'LiteSpeed';
+		$this->assertSame( 'litespeed', Directory::server() );
+		unset( $_SERVER['SERVER_SOFTWARE'] );
+	}
+
+	public function test_the_web_server_can_be_named_with_a_filter_for_hosts_behind_a_proxy(): void {
+		unset( $_SERVER['SERVER_SOFTWARE'] );
+		Functions\when( 'wp_unslash' )->returnArg();
+		Filters\expectApplied( 'axle_config_sync_web_server' )->once()->with( 'unknown' )->andReturn( 'nginx' );
+		$this->assertTrue( Directory::ignores_htaccess() );
+
+		Filters\expectApplied( 'axle_config_sync_web_server' )->once()->andReturn( 'caddy' );
+		$this->assertSame( 'unknown', Directory::server() );
+
+		$_SERVER['SERVER_SOFTWARE'] = 'Apache/2.4';
+		Filters\expectApplied( 'axle_config_sync_web_server' )->once()->with( 'apache' )->andReturn( 'nginx' );
+		$this->assertSame( 'nginx', Directory::server(), 'The filter can correct a wrong guess.' );
+		unset( $_SERVER['SERVER_SOFTWARE'] );
 	}
 }

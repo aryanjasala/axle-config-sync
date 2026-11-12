@@ -80,3 +80,49 @@
 .acs-undo-form {
 	display: inline;
 }
+
+.acs-undo-form .axle-confirm {
+	max-width: 32em;
+}
+
+.acs-drift-actions {
+	min-width: 12em;
+}
+
+.acs-drift-actions .axle-confirm {
+	max-width: 28em;
+}
+
+.acs-drift-actions .button,
+.acs-drift-actions .button-link {
+	margin: 0 8px 4px 0;
+}
+
+.acs-drift .axle-diff {
+	max-width: 32em;
+	overflow-wrap: anywhere;
+}
+
+.acs-copy textarea {
+	width: 100%;
+}
+
+.acs-expected-list {
+	margin: 0 0 16px;
+}
+
+.acs-recheck {
+	margin-top: 8px;
+}
+
+.acs-commands {
+	margin-top: 24px;
+}
+
+.acs-import-plan code {
+	overflow-wrap: anywhere;
+}
+
+.acs-toolbar-note {
+	color: var(--axle-muted);
+}

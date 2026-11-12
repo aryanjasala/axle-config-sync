@@ -83,7 +83,98 @@
       "name": "Notice after an export, and the served-directory warning",
       "setup": [{ "js": "seed.js", "call": "seedSite" }, { "wp": ["eval", "unlink( WP_CONTENT_DIR . '/axle-config/.htaccess' ); delete_transient( 'axle_config_sync_reachable' );"] }],
       "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=export",
-      "steps": [{ "click": "button[value=\"all\"]" }, { "waitFor": ".acs-notice" }],
+      "steps": [{ "click": "#acs-export-start" }, { "click": "#acs-export-confirm button[value=\"all\"]" }, { "waitFor": ".acs-notice" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Status, Get started card on a fresh site",
+      "setup": [{ "js": "seed.js", "call": "installFixture" }, { "js": "seed.js", "call": "resetSync" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync",
+      "steps": [{ "waitFor": ".acs-get-started" }]
+    },
+    {
+      "name": "Drift, nothing found yet",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=drift",
+      "steps": [{ "waitFor": ".acs-empty" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Drift with changed settings",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftWatch" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=drift",
+      "steps": [{ "waitFor": ".acs-drift" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Drift, write to file confirm step open",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftWatch" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=drift",
+      "steps": [{ "waitFor": ".acs-drift" }, { "click": ".acs-drift-actions [data-acs-reveal]" }, { "waitFor": ".acs-drift-actions .axle-confirm:not([hidden])" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Drift, write all confirm step open",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftWatch" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=drift",
+      "steps": [{ "waitFor": ".acs-drift" }, { "click": "#acs-keep-all-start" }, { "waitFor": "#acs-keep-all-confirm:not([hidden])" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Drift notice on the Dashboard",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftWatch" }],
+      "url": "/wp-admin/index.php",
+      "include": [".axle-drift-notice"],
+      "steps": [{ "waitFor": ".axle-drift-notice" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Apply: preview, confirm step open",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "driftSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=apply",
+      "steps": [{ "click": "[data-acs-select=\"all\"]" }, { "click": "#acs-preview" }, { "waitFor": ".acs-confirm" }, { "click": "#acs-apply" }, { "waitFor": "#acs-apply-confirm:not([hidden])" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Export, confirm step open when files exist",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=export",
+      "steps": [{ "click": "#acs-export-start" }, { "waitFor": "#acs-export-confirm:not([hidden])" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "History, undo confirm step open",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "seedHistory" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=history",
+      "steps": [{ "waitFor": ".acs-history" }, { "click": ".acs-undo-form [data-acs-reveal]" }, { "waitFor": ".acs-undo-form .axle-confirm:not([hidden])" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Import, nothing to import",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=import",
+      "steps": [{ "waitFor": ".acs-empty" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Import, bundles found",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "seedWpCfm" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=import",
+      "steps": [{ "waitFor": ".acs-bundles" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Import, preview with items left out and the confirm step open",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "js": "seed.js", "call": "seedWpCfm" }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync&tab=import",
+      "steps": [{ "click": "#acs-import-preview" }, { "waitFor": ".acs-import-plan" }, { "click": "#acs-import-start" }, { "waitFor": "#acs-import-confirm:not([hidden])" }],
+      "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
+    },
+    {
+      "name": "Status on nginx without a deny rule",
+      "setup": [{ "js": "seed.js", "call": "seedSite" }, { "wp": ["option", "update", "acs_fixture_server", "nginx"] }, { "wp": ["eval", "unlink( WP_CONTENT_DIR . '/axle-config/.htaccess' ); delete_transient( 'axle_config_sync_reachable' );"] }],
+      "url": "/wp-admin/options-general.php?page=axle-config-sync",
+      "steps": [{ "waitFor": ".acs-webroot-reachable" }],
       "cleanup": [{ "js": "seed.js", "call": "unseedSite" }]
     }
   ],

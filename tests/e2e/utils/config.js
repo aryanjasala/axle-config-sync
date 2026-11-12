@@ -12,5 +12,5 @@ module.exports = {
 	// This plugin's own Docker site by default. A shared site can be used by pointing WP_COMPOSE_DIR at its compose folder.
 	COMPOSE_DIR: process.env.WP_COMPOSE_DIR || path.join( __dirname, '..', 'env' ),
 	// Options the plugin stores, cleared before each run.
-	OPTIONS: ['axle_config_sync_settings', 'axle_config_sync_state', 'acs_fixture_constants', 'acs_fixture_home'],
+	OPTIONS: ['axle_config_sync_settings', 'axle_config_sync_state', 'acs_fixture_constants', 'acs_fixture_home', 'acs_fixture_mail', 'acs_fixture_hook', 'acs_fixture_server', 'axle_config_sync_drift', 'axle_config_sync_drift_actors', 'wpcfm_settings'],
 };

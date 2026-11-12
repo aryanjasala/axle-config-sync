@@ -42,6 +42,21 @@ After every export and apply, the plugin remembers both sides. So it can tell "c
 * **Secrets never go into files.** Values under keys like `api_key`, `token` or `password`, and values that look random, are written as `{"$secret":"ACME_API_KEY"}`. Apply reads them from the constant `AXLE_SECRET_ACME_API_KEY`, then the environment variable, then a filter. If nothing sets it, the live value is kept and the preview says why.
 * **Per-environment values.** `env/production.json` sets values for production only, such as the admin email.
 
+= Drift watch =
+
+You set `comments off` in the files. Production has had them on since Tuesday, and the next deploy would turn them off again without a word. Config Sync finds that for you.
+
+* A **daily check** (and one on demand) compares the live values with the files. A setting has drifted when it changed on the site after the files were written.
+* New drift raises an **admin notice** for people who can apply, a **Site Health** test, and, if you turn them on, an **email** and a **webhook**. Both are off by default. Each message lists the item, the value in the files and on the site (secrets masked), and who changed it.
+* **Who changed it**: the plugin records the user and time when a tracked setting changes, with a cheap hook that ignores every other option. If Activity Log with Undo is active, its entry is used instead.
+* **Keep or put back**, for one item or all: "Write to files" accepts the live value (when the folder cannot be written, you get the file to download or copy), and "Put back from files" is the normal apply with a preview and undo.
+* An **expected list** holds settings a site may change on purpose. They are never reported.
+* `wp axle-config-sync drift` exits with 1 when anything drifted, so a deploy script can stop before it overwrites a live change.
+
+= Coming from WP-CFM? =
+
+WP-CFM was closed on WordPress.org in January 2026, and your deploy script may still call `wp config pull`. The Import tab and `wp axle-config-sync import wp-cfm` read your bundles (the files in `wp-content/config` and the bundle list in the database, with or without WP-CFM active), show how each item maps and which cannot be mapped and why, and write Config Sync files. Nothing is applied to the site, and WP-CFM's files are left alone. Serialized values are decoded without loading any class; a value that holds a PHP object is left out with a reason. The reference has the commands side by side.
+
 = Safe to apply =
 
 * Preview first: before and after for every item, with warnings for missing pages, unset secrets and plugin version differences.
@@ -62,22 +77,24 @@ The deploy one-liner:
 * `wp axle-config-sync diff <item>`, `export [<item>...] [--all] [--dir=]`, `apply [<item>...] [--all] [--dry-run] [--allow-dangerous] [--force] [--yes]`.
 * `wp axle-config-sync undo <changeset> [--force]` and `changesets`.
 * `wp axle-config-sync track <option-or-pattern>` and `untrack`.
+* `wp axle-config-sync drift [--check] [--format=]` exits with 1 when a setting changed on the site after its file was written. `expected list|add|remove` manages the expected list, and `drift-alerts` shows or sets the email and webhook.
+* `wp axle-config-sync import wp-cfm [--bundle=] [--dry-run]` imports WP-CFM bundles.
 * `wp axle-config-sync secrets check [--dir=]` exits with 1 when a secret is committed by hand.
 * `wp axle-config-sync env` prints the environment this site thinks it is in.
 
 = For developers =
 
-Every default, list, limit and message has a filter, and every step of an apply fires an action, so an activity log can group one apply into one change set. Third-party providers (for settings in a plugin's own tables) plug in through `axle_config_sync_providers`. Abilities for AI agents on WordPress 6.9 and later. The full list is in [the reference](https://github.com/aryanjasala/axle-config-sync/blob/main/docs/REFERENCE.md).
+Every default, list, limit and message has a filter, and every step of an apply fires an action, so an activity log can group one apply into one change set. Third-party providers (for settings in a plugin's own tables) plug in through `axle_config_sync_providers`. Abilities for AI agents on WordPress 6.9 and later, including a read-only one for drift. The full list is in [the reference](https://github.com/aryanjasala/axle-config-sync/blob/main/docs/REFERENCE.md).
 
 = Privacy =
 
-Change sets record the user who applied or exported, and when. The plugin adds suggested text to Settings > Privacy and takes part in Tools > Export Personal Data and Erase Personal Data (erasing keeps the history without the user). Change sets are deleted after 30 days, or beyond 50. Settings files can hold the admin email address; the preview flags email addresses and suggests an environment file for them.
+Change sets record the user who applied or exported, and when. The drift watch also keeps the user ID and the time of the last change to each tracked setting, so it can say who changed it. Those records go away after the retention period once the setting no longer drifts. The plugin adds suggested text to Settings > Privacy and takes part in Tools > Export Personal Data and Erase Personal Data (erasing keeps the history without the user, and clears the user from drift records). Change sets are deleted after 30 days, or beyond 50. Settings files can hold the admin email address; the preview flags email addresses and suggests an environment file for them.
 
 == Frequently Asked Questions ==
 
 = Where are the files? =
 
-In `wp-content/axle-config/` by default, with an `.htaccess` deny and an empty `index.php`. nginx ignores `.htaccess`, so the screen requests a test file over HTTP and shows the nginx rule when the folder is served. Better: move the folder outside the web root with `define( 'AXLE_CONFIG_SYNC_DIR', '/path/to/repo/config' );` in wp-config.php. On multisite each site gets its own `sites/<id>/` folder.
+In `wp-content/axle-config/` by default, with an `.htaccess` deny and an empty `index.php`. nginx ignores `.htaccess`, so the screen and Site Health request a test file over HTTP. When the folder is served, or when nginx is the server and the check could not get through, they show the rule to add to the server block. On multisite the rule covers every site's folder. Better: move the folder outside the web root with `define( 'AXLE_CONFIG_SYNC_DIR', '/path/to/repo/config' );` in wp-config.php. On multisite each site gets its own `sites/<id>/` folder.
 
 = Does it change content? =
 
@@ -93,7 +110,15 @@ Add the item (or `item#/json/pointer`) under "Not secrets" on the Track tab. The
 
 = What about WP-CFM bundles? =
 
-WP-CFM left the directory in January 2026. Importing its bundle files is an idea for version 1.1. For now, track the same options here and export once.
+Import them on the Import tab or with `wp axle-config-sync import wp-cfm --dry-run` and then without `--dry-run`. Options map one to one. Widgets, menus and roles are left out with the reason, because Config Sync keeps them as their own items: run `wp axle-config-sync export --all` on the live site for those. `wp config pull all` in a deploy script becomes `wp axle-config-sync apply --all --yes`.
+
+= Who changed a setting, if I do not have Activity Log with Undo? =
+
+Config Sync records the user and the time when a tracked setting changes. A change made from WP-CLI, a scheduled task or a REST request shows that source instead of a name. Changes to menus and widgets are recorded per provider, so they show who last touched any item of it.
+
+= Does the drift email or webhook send my secrets? =
+
+No. Values are masked the same way as in the files: a secret shows as `{"$secret":"NAME"}`. Long values are cut at 200 characters (`axle_config_sync_drift_value_length`). Both channels are off until you turn them on.
 
 = Does it work on multisite? =
 
@@ -110,10 +135,14 @@ Activating plugins from a file is a big lever for anyone who can push to the rep
 3. One item's difference between the file and the site.
 4. History: past applies with Undo.
 5. Track: which providers and plugin options are synced, and the option finder.
+6. Drift: settings changed on the live site, who changed them, and the choice to keep or put back.
+7. Import: WP-CFM bundles, how each item maps, and what was left out.
 
 == External services ==
 
-This plugin makes no external calls. It sends one request to its own site, to check whether the config directory is served over HTTP.
+This plugin makes no external calls unless you ask for one. It sends one request to its own site, to check whether the config directory is served over HTTP.
+
+The drift webhook is the only call to another server. It is off until you enter an address under Settings > Config Sync > Drift > Alerts. When you do, the plugin sends a JSON POST to that address for each new drift. The body holds the site URL, the environment name, and for each drifted setting its ID, label, the value in the files and on the site (secrets masked, long values cut), who changed it and when. The service you point it at has its own terms and privacy policy. The drift email goes through your site's normal mail setup.
 
 == Changelog ==
 

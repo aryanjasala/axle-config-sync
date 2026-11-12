@@ -2,7 +2,7 @@
 const { wp, wpEval } = require( './utils' );
 
 const DIR = 'WP_CONTENT_DIR . "/axle-config"';
-const FIXTURE_OPTIONS = [ 'acs_fixture_constants', 'acs_fixture_home', 'acme_api_key', 'acme_payload', 'acs_demo_link', 'acme_settings' ];
+const FIXTURE_OPTIONS = [ 'acs_fixture_constants', 'acs_fixture_home', 'acs_fixture_mail', 'acs_fixture_hook', 'acs_fixture_server', 'acme_api_key', 'acme_payload', 'acs_demo_link', 'acme_settings', 'acme_list', 'wpcfm_settings', 'axle_config_sync_drift', 'axle_config_sync_drift_actors' ];
 
 /** Whether a WP-CLI command succeeds. */
 function succeeds( ...args ) {
@@ -32,9 +32,16 @@ function resetSync() {
 		succeeds( 'option', 'delete', name );
 	}
 	succeeds( 'transient', 'delete', 'axle_config_sync_reachable' );
+	wpEval( '$d = WP_CONTENT_DIR . "/config"; if ( is_dir( $d ) ) { foreach ( glob( $d . "/*" ) as $f ) { is_file( $f ) && unlink( $f ); } rmdir( $d ); } delete_metadata( "user", 0, "axle_config_sync_drift_seen", "", true ); delete_metadata( "user", 0, "axle_config_sync_steps_dismissed", "", true );' );
 	wp( 'option', 'update', 'blogname', 'E2E' );
 	wp( 'option', 'update', 'default_role', 'subscriber' );
 	wp( 'option', 'update', 'admin_email', 'admin@example.com' );
+}
+
+/** Writes a WP-CFM bundle file, as WP-CFM 1.7 does: a `.label` and raw option values. */
+function writeWpCfmBundle( name, values, label ) {
+	const encoded = Buffer.from( JSON.stringify( { '.label': label || name, ...values }, null, 4 ) ).toString( 'base64' );
+	wpEval( `$d = WP_CONTENT_DIR . "/config"; wp_mkdir_p( $d ); file_put_contents( $d . "/${ name }.json", base64_decode( "${ encoded }" ) );` );
 }
 
 /** Sets test constants (read by the fixture on the next request). */
@@ -114,6 +121,21 @@ function driftSite() {
 	return true;
 }
 
+/** Changes settings on the site after the export, and runs a drift check. */
+function driftWatch() {
+	wp( 'option', 'update', 'blogname', 'Changed on production' );
+	wp( 'option', 'update', 'blogdescription', 'Edited on the live site' );
+	succeeds( 'axle-config-sync', 'drift', '--check' );
+	return true;
+}
+
+/** Puts a WP-CFM bundle on the site, with a bundle list in the database. */
+function seedWpCfm() {
+	writeWpCfmBundle( 'main', { blogname: 'Bean There', acme_list: 'a:2:{i:0;s:1:"a";i:1;s:1:"b";}', siteurl: 'http://localhost', acme_object: 'O:8:"stdClass":0:{}', widget_text: 'a:0:{}' }, 'Main settings' );
+	wp( 'option', 'update', 'wpcfm_settings', JSON.stringify( { bundles: [ { label: 'Main settings', name: 'main', config: [ 'blogname', 'acme_list', 'siteurl', 'acme_object', 'widget_text' ] } ] } ) );
+	return true;
+}
+
 /** Applies one change through the CLI so History has a change set. */
 function seedHistory() {
 	setFileValue( 'options/date_format', 'j F Y' );
@@ -132,4 +154,4 @@ function unseedSite() {
 	resetSync();
 }
 
-module.exports = { succeeds, installFixture, removeFixture, resetSync, setConstants, readFile, writeFile, setFileValue, allFileText, option, hasAbilities, seedSite, driftSite, seedHistory, unseedSite };
+module.exports = { writeWpCfmBundle, succeeds, installFixture, removeFixture, resetSync, setConstants, readFile, writeFile, setFileValue, allFileText, option, hasAbilities, seedSite, driftSite, seedHistory, driftWatch, seedWpCfm, unseedSite };

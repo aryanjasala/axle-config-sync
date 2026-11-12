@@ -19,6 +19,7 @@ final class Schema {
 	public const DB_VERSION        = '1';
 	public const DB_VERSION_OPTION = 'axle_config_sync_db_version';
 	public const CRON_HOOK         = 'axle_config_sync_purge';
+	public const DRIFT_CRON_HOOK   = 'axle_config_sync_drift_check';
 
 	/**
 	 * The change-set table.
@@ -50,6 +51,7 @@ final class Schema {
 			(bool) $network_wide,
 			static function (): void {
 				wp_clear_scheduled_hook( self::CRON_HOOK );
+				wp_clear_scheduled_hook( self::DRIFT_CRON_HOOK );
 			}
 		);
 	}
@@ -64,6 +66,16 @@ final class Schema {
 
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::CRON_HOOK );
+		}
+		self::schedule_drift();
+	}
+
+	/**
+	 * Keeps the drift check scheduled.
+	 */
+	private static function schedule_drift(): void {
+		if ( ! wp_next_scheduled( self::DRIFT_CRON_HOOK ) ) {
+			wp_schedule_event( time() + 2 * HOUR_IN_SECONDS, Drift::recurrence(), self::DRIFT_CRON_HOOK );
 		}
 	}
 
@@ -100,6 +112,7 @@ final class Schema {
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::CRON_HOOK );
 		}
+		self::schedule_drift();
 	}
 
 	/**

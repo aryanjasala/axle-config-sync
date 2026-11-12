@@ -22,7 +22,7 @@ defined( 'ABSPATH' ) || exit;
  */
 final class Directory {
 
-	public const PROBE     = 'reachability-check.txt';
+	public const PROBE     = 'reachability-check.json';
 	public const TRANSIENT = 'axle_config_sync_reachable';
 
 	/**
@@ -168,12 +168,55 @@ final class Directory {
 	}
 
 	/**
-	 * The nginx rule that keeps the directory private.
+	 * The web server that answers this request.
+	 *
+	 * @return string nginx, apache, litespeed, iis or unknown.
+	 */
+	public static function server(): string {
+		$software = isset( $_SERVER['SERVER_SOFTWARE'] ) ? strtolower( sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ) ) ) : '';
+		$server   = 'unknown';
+		foreach ( array( 'nginx', 'litespeed', 'apache', 'iis' ) as $name ) {
+			if ( false !== strpos( $software, $name ) ) {
+				$server = $name;
+				break;
+			}
+		}
+
+		/**
+		 * Filters the detected web server, for hosts that hide it behind a proxy.
+		 *
+		 * @param string $server nginx, apache, litespeed, iis or unknown.
+		 */
+		$server = (string) apply_filters( 'axle_config_sync_web_server', $server );
+
+		return in_array( $server, array( 'nginx', 'apache', 'litespeed', 'iis' ), true ) ? $server : 'unknown';
+	}
+
+	/**
+	 * Whether the server ignores .htaccess files, so the deny file Config Sync
+	 * writes protects nothing.
+	 *
+	 * @return bool
+	 */
+	public static function ignores_htaccess(): bool {
+		return 'nginx' === self::server();
+	}
+
+	/**
+	 * The nginx rule that keeps the directory private. On multisite it covers
+	 * the base folder, so every site's files are protected.
 	 *
 	 * @return string
 	 */
 	public function nginx_rule(): string {
-		return sprintf( "location ^~ %s {\n\tdeny all;\n\treturn 404;\n}", '' !== $this->web_path() ? $this->web_path() : '/wp-content/axle-config/' );
+		$path = $this->web_path();
+		if ( '' === $path ) {
+			$path = '/wp-content/axle-config/';
+		} elseif ( is_multisite() ) {
+			$path = (string) preg_replace( '#sites/[^/]+/$#', '', $path );
+		}
+
+		return sprintf( "location ^~ %s {\n\tdeny all;\n\treturn 404;\n}", $path );
 	}
 
 	/**
