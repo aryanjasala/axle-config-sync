@@ -41,16 +41,25 @@ final class Privacy implements Service {
 	private Drift $drift;
 
 	/**
+	 * The lock.
+	 *
+	 * @var Lock|null
+	 */
+	private ?Lock $lock;
+
+	/**
 	 * Sets up the privacy tools.
 	 *
 	 * @param Changesets $changesets Change sets.
 	 * @param State      $state      Sync state.
 	 * @param Drift      $drift      The drift watch.
+	 * @param Lock|null  $lock       The lock.
 	 */
-	public function __construct( Changesets $changesets, State $state, Drift $drift ) {
+	public function __construct( Changesets $changesets, State $state, Drift $drift, ?Lock $lock = null ) {
 		$this->changesets = $changesets;
 		$this->state      = $state;
 		$this->drift      = $drift;
+		$this->lock       = $lock;
 	}
 
 	/**
@@ -132,6 +141,25 @@ final class Privacy implements Service {
 					);
 				}
 			}
+			if ( $this->lock && 1 === max( 1, (int) $page ) ) {
+				foreach ( $this->lock->records_for_user( (int) $user->ID ) as $name => $at ) {
+					$data[] = array(
+						'group_id'    => 'axle-config-sync-lock',
+						'group_label' => __( 'Config Sync "Change it here anyway" records', 'axle-config-sync' ),
+						'item_id'     => 'axle-config-sync-lock-' . md5( $name ),
+						'data'        => array(
+							array(
+								'name'  => __( 'Setting', 'axle-config-sync' ),
+								'value' => $name,
+							),
+							array(
+								'name'  => __( 'Chosen (UTC)', 'axle-config-sync' ),
+								'value' => gmdate( 'Y-m-d H:i:s', (int) $at ),
+							),
+						),
+					);
+				}
+			}
 			foreach ( $rows as $row ) {
 				$data[] = array(
 					'group_id'    => 'axle-config-sync-changesets',
@@ -179,7 +207,7 @@ final class Privacy implements Service {
 		$user    = get_user_by( 'email', (string) $email );
 		$changed = 0;
 		if ( $user ) {
-			$changed = $this->changesets->anonymize_user( (int) $user->ID ) + $this->state->forget_user( (int) $user->ID ) + $this->drift->forget_user( (int) $user->ID );
+			$changed = $this->changesets->anonymize_user( (int) $user->ID ) + $this->state->forget_user( (int) $user->ID ) + $this->drift->forget_user( (int) $user->ID ) + ( $this->lock ? $this->lock->forget_user( (int) $user->ID ) : 0 );
 		}
 
 		return array(
@@ -200,7 +228,7 @@ final class Privacy implements Service {
 
 		$text = sprintf(
 			/* translators: %d: number of days. */
-			__( 'When an administrator exports or applies site settings with Axle Config Sync, the site records who did it and when, so the change can be reviewed and undone. These records are deleted after %d days. When a tracked setting is changed, the site also keeps the user ID and the time of the change, so the drift watch can say who changed it. These records are deleted after the same number of days once the setting no longer differs from its file. Settings files may contain the site admin email address. If you turn on the drift email or webhook, the changed settings are sent to the address or server you set, with secrets masked.', 'axle-config-sync' ),
+			__( 'When an administrator exports or applies site settings with Axle Config Sync, the site records who did it and when, so the change can be reviewed and undone. These records are deleted after %d days. When a tracked setting is changed, the site also keeps the user ID and the time of the change, so the drift watch can say who changed it. These records are deleted after the same number of days once the setting no longer differs from its file. When someone chooses \"Change it here anyway\" for a setting managed in git, the site keeps the user ID and the time, until the next deploy puts the file value back. Settings files may contain the site admin email address. If you turn on the drift email or webhook, the changed settings are sent to the address or server you set, with secrets masked.', 'axle-config-sync' ),
 			Settings::retention_days()
 		);
 

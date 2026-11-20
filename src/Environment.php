@@ -7,12 +7,14 @@
 
 namespace AryanX\Axle\ConfigSync;
 
+use AryanX\Axle\ConfigSync\Admin\AxleUi;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
  * The environment is AXLE_CONFIG_SYNC_ENV when it is defined, else
- * wp_get_environment_type(), the same source Staging Guard uses, so both
- * agree. env/<environment>.json in the config directory then sets values for
+ * AxleUi::environment_type(), the answer Staging Guard shapes for every Axle
+ * plugin, so all of them agree. env/<environment>.json in the config directory then sets values for
  * this environment only: item => JSON pointer => value.
  */
 final class Environment {
@@ -50,7 +52,7 @@ final class Environment {
 			$name   = AXLE_CONFIG_SYNC_ENV;
 			$source = 'AXLE_CONFIG_SYNC_ENV';
 		} else {
-			$name   = wp_get_environment_type();
+			$name   = AxleUi::environment_type();
 			$source = defined( 'WP_ENVIRONMENT_TYPE' ) || false !== getenv( 'WP_ENVIRONMENT_TYPE' ) ? 'WP_ENVIRONMENT_TYPE' : 'wp_get_environment_type()';
 		}
 

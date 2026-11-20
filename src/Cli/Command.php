@@ -11,6 +11,7 @@ use AryanX\Axle\ConfigSync\Codec;
 use AryanX\Axle\ConfigSync\Drift;
 use AryanX\Axle\ConfigSync\Engine;
 use AryanX\Axle\ConfigSync\Environment;
+use AryanX\Axle\ConfigSync\Lock;
 use AryanX\Axle\ConfigSync\Rules;
 
 defined( 'ABSPATH' ) || exit;
@@ -37,14 +38,23 @@ final class Command {
 	private Drift $drift;
 
 	/**
+	 * The lock.
+	 *
+	 * @var Lock|null
+	 */
+	private ?Lock $lock;
+
+	/**
 	 * Sets up the command.
 	 *
-	 * @param Engine $engine The engine.
-	 * @param Drift  $drift  The drift watch.
+	 * @param Engine    $engine The engine.
+	 * @param Drift     $drift  The drift watch.
+	 * @param Lock|null $lock   The lock.
 	 */
-	public function __construct( Engine $engine, Drift $drift ) {
+	public function __construct( Engine $engine, Drift $drift, ?Lock $lock = null ) {
 		$this->engine = $engine;
 		$this->drift  = $drift;
+		$this->lock   = $lock;
 	}
 
 	/**
@@ -166,6 +176,76 @@ final class Command {
 		if ( $items ) {
 			\WP_CLI::halt( 1 );
 		}
+	}
+
+	/**
+	 * Shows the managed-in-git lock, or ends every open "Change it here anyway".
+	 *
+	 * WP-CLI is never locked: this command only reports what a person on a settings screen would meet on production.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [<action>]
+	 * : status (default) or end.
+	 *
+	 * [--format=<format>]
+	 * : For status: table, json, csv, yaml or ids (the managed option names).
+	 * ---
+	 * default: table
+	 * ---
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp axle-config-sync lock
+	 *     wp axle-config-sync lock status --format=json
+	 *     wp axle-config-sync lock end
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Named arguments.
+	 */
+	public function lock( $args, $assoc_args ): void {
+		if ( ! $this->lock ) {
+			\WP_CLI::error( 'The lock is not available.' );
+		}
+
+		$action = (string) ( $args[0] ?? 'status' );
+		if ( 'end' === $action ) {
+			$ended = $this->lock->end_overrides();
+			/* translators: %d: number of open overrides. */
+			\WP_CLI::success( sprintf( _n( 'Ended %d open override.', 'Ended %d open overrides.', $ended, 'axle-config-sync' ), $ended ) );
+			return;
+		}
+		if ( 'status' !== $action ) {
+			\WP_CLI::error( 'Use status or end.' );
+		}
+
+		$status = $this->lock->status();
+		$format = (string) \WP_CLI\Utils\get_flag_value( $assoc_args, 'format', 'table' );
+		if ( 'ids' === $format ) {
+			\WP_CLI::line( implode( ' ', $status['managed'] ) );
+			return;
+		}
+
+		$rows  = array();
+		$until = array();
+		foreach ( $status['overrides'] as $open ) {
+			$until[ $open['option'] ] = gmdate( 'Y-m-d H:i:s', (int) $open['until'] );
+		}
+		foreach ( $status['managed'] as $name ) {
+			$rows[] = array(
+				'option'   => $name,
+				'locked'   => $status['locking'] && ! isset( $until[ $name ] ) ? 'yes' : 'no',
+				'released' => $until[ $name ] ?? '',
+			);
+		}
+		if ( 'table' === $format ) {
+			\WP_CLI::log( sprintf( 'Environment: %1$s. Lock: %2$s.', $status['environment'], $status['locking'] ? 'on' : 'off' ) );
+		}
+		if ( 'json' === $format ) {
+			\WP_CLI::line( (string) wp_json_encode( $status ) );
+			return;
+		}
+		\WP_CLI\Utils\format_items( $format, $rows, array( 'option', 'locked', 'released' ) );
 	}
 
 	/**

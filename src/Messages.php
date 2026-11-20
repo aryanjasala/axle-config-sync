@@ -84,6 +84,14 @@ final class Messages {
 			'secret_in_file'     => __( 'Not written: a secret is still in plain text at %s. Mark it "not a secret" on the Track tab, or keep it out of the value.', 'axle-config-sync' ),
 			'never_sync'         => __( 'This item is never synced.', 'axle-config-sync' ),
 			'bad_file'           => __( 'The file is not valid JSON for this plugin.', 'axle-config-sync' ),
+			/* translators: %s: option name. */
+			'locked'             => __( '%s is managed in git on production, so this change was not saved. Change the file and deploy it, or choose "Change it here anyway".', 'axle-config-sync' ),
+			/* translators: %s: option name. */
+			'lock_not_managed'   => __( '%s is not managed in git on this site, so there is nothing to change here.', 'axle-config-sync' ),
+			'lock_forbidden'     => __( 'You need the capability that owns this setting to change it here.', 'axle-config-sync' ),
+			'lock_frozen'        => __( 'Axle Read-Only Mode has frozen this site, so a managed setting cannot be released now.', 'axle-config-sync' ),
+			/* translators: 1: option name, 2: time the window ends. */
+			'lock_released'      => __( 'You can change %1$s here until %2$s. The change is logged, and the setting is left out of drift reports until the next deploy puts the file value back.', 'axle-config-sync' ),
 			/* translators: %s: capabilities. */
 			'dangerous_role'     => __( 'Role gains %s.', 'axle-config-sync' ),
 			'dangerous_change'   => __( 'Changes who can sign up, sign in or manage the site.', 'axle-config-sync' ),

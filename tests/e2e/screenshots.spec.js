@@ -35,11 +35,12 @@ test.describe( 'Screenshots', () => {
 	} );
 
 	test( '2: the preview', async () => {
-		await page.goto( `${ SCREEN }&tab=apply` );
+		await page.goto( SCREEN );
 		for ( const id of [ 'options/blogname', 'options/default_role', 'options/posts_per_page' ] ) {
 			await page.locator( `input[name="items[]"][value="${ id }"]` ).check();
 		}
-		await page.getByRole( 'button', { name: 'Preview' } ).click();
+		await page.getByLabel( 'Bulk actions' ).selectOption( 'apply' );
+		await page.locator( '#acs-bulk-go' ).click();
 		await expect( page.locator( '.acs-confirm' ) ).toBeVisible();
 		await shot( page, 2, { fullPage: true } );
 	} );
@@ -72,9 +73,15 @@ test.describe( 'Screenshots', () => {
 
 	test( '7: import', async () => {
 		seedWpCfm();
-		await page.goto( `${ SCREEN }&tab=import` );
+		await page.goto( `${ SCREEN }&view=import` );
 		await page.locator( '#acs-import-preview' ).click();
 		await expect( page.locator( '.acs-import-plan' ) ).toBeVisible();
 		await shot( page, 7, { fullPage: true } );
+	} );
+
+	test( '8: managed in git', async () => {
+		await page.goto( '/wp-admin/options-discussion.php' );
+		await expect( page.locator( '.axle-managed-summary' ) ).toBeVisible();
+		await shot( page, 8, { fullPage: true } );
 	} );
 } );

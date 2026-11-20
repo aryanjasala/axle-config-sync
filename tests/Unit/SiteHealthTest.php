@@ -8,6 +8,7 @@
 namespace AryanX\Axle\ConfigSync\Tests\Unit;
 
 use AryanX\Axle\ConfigSync\Drift;
+use AryanX\Axle\ConfigSync\Lock;
 use AryanX\Axle\ConfigSync\Health\SiteHealth;
 use Brain\Monkey\Functions;
 
@@ -39,6 +40,41 @@ final class SiteHealthTest extends SyncTestCase {
 		$engine = $this->engine( new MemoryProvider() );
 
 		return new SiteHealth( $engine, new Drift( $engine ) );
+	}
+
+	/**
+	 * Health tests with a lock over a directory that has a file for blogname.
+	 *
+	 * @param bool $with_file Whether git owns blogname.
+	 * @return SiteHealth
+	 */
+	private function health_with_lock( bool $with_file = true ): SiteHealth {
+		if ( $with_file ) {
+			$this->put( 'options/blogname.json', array( 'value' => 'x' ) );
+		}
+		$provider               = new MemoryProvider();
+		$provider->providerName = 'options';
+		$engine                 = $this->engine( $provider );
+
+		return new SiteHealth( $engine, new Drift( $engine ), new Lock( $engine ) );
+	}
+
+	public function test_the_lock_test_is_good_when_locked_and_recommended_when_the_lock_is_off(): void {
+		$this->assertArrayHasKey( 'axle_config_sync_lock', $this->health_with_lock()->add_tests( array() )['direct'] );
+		$this->assertSame( 'good', $this->health_with_lock()->test_lock()['status'] );
+
+		$this->options[ Lock::SETTINGS ] = array(
+			'enabled' => false,
+			'minutes' => 30,
+		);
+		$this->assertSame( 'recommended', $this->health_with_lock()->test_lock()['status'] );
+	}
+
+	public function test_the_lock_test_is_good_when_nothing_is_managed_or_off_production(): void {
+		$this->assertSame( 'good', $this->health_with_lock( false )->test_lock()['status'] );
+
+		Functions\when( 'wp_get_environment_type' )->justReturn( 'staging' );
+		$this->assertSame( 'good', $this->health_with_lock()->test_lock()['status'] );
 	}
 
 	public function test_the_drift_test_is_registered(): void {

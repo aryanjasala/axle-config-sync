@@ -2,7 +2,7 @@
 const { wp, wpEval } = require( './utils' );
 
 const DIR = 'WP_CONTENT_DIR . "/axle-config"';
-const FIXTURE_OPTIONS = [ 'acs_fixture_constants', 'acs_fixture_home', 'acs_fixture_mail', 'acs_fixture_hook', 'acs_fixture_server', 'acme_api_key', 'acme_payload', 'acs_demo_link', 'acme_settings', 'acme_list', 'wpcfm_settings', 'axle_config_sync_drift', 'axle_config_sync_drift_actors' ];
+const FIXTURE_OPTIONS = [ 'acs_fixture_constants', 'acs_fixture_home', 'acs_fixture_mail', 'acs_fixture_hook', 'acs_fixture_server', 'acme_api_key', 'acme_payload', 'acs_demo_link', 'acme_settings', 'acme_list', 'wpcfm_settings', 'axle_config_sync_drift', 'axle_config_sync_drift_actors', 'axle_config_sync_lock_overrides', 'axle_config_sync_lock_released', 'axle_config_sync_lock_settings' ];
 
 /** Whether a WP-CLI command succeeds. */
 function succeeds( ...args ) {

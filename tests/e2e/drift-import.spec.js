@@ -90,10 +90,9 @@ test.describe( 'Drift watch', () => {
 		await expect( row.locator( '.axle-diff ins' ) ).toContainText( 'Changed by the admin' );
 		await expect( row.locator( 'time.axle-time' ) ).toHaveCount( 1 );
 
-		await row.getByRole( 'button', { name: 'Write to file' } ).click();
-		await expect( row.locator( '.axle-confirm' ) ).toBeFocused();
-		await expect( row.locator( '.axle-confirm' ) ).toContainText( 'Nothing changes on the site' );
-		await row.getByRole( 'button', { name: 'Write this file' } ).click();
+		await expect( row.locator( '.axle-diff del' ) ).toHaveAttribute( 'data-label', 'Files' );
+		await expect( row.locator( '.axle-diff ins' ) ).toHaveAttribute( 'data-label', 'This site' );
+		await row.getByRole( 'button', { name: 'Keep site value' } ).click();
 
 		await expect( page.locator( '.acs-notice' ) ).toContainText( 'Wrote 1 file' );
 		expect( readFile( 'options/blogname.json' ).value ).toBe( 'Changed by the admin' );
@@ -106,7 +105,7 @@ test.describe( 'Drift watch', () => {
 		changeAsAdmin( 'blogname', 'Changed by the admin' );
 
 		await page.goto( `${ SCREEN }&tab=drift` );
-		await driftRow( page, 'options/blogname' ).getByRole( 'link', { name: 'Put back from files' } ).click();
+		await driftRow( page, 'options/blogname' ).getByRole( 'link', { name: 'Put back', exact: true } ).click();
 		await expect( page.locator( '.acs-preview-item[data-item="options/blogname"]' ) ).toContainText( 'Will be applied' );
 		await page.locator( '#acs-apply' ).click();
 		await page.locator( '#acs-apply-now' ).click();
@@ -134,7 +133,7 @@ test.describe( 'Drift watch', () => {
 		wp( 'option', 'update', 'blogdescription', 'A new tagline' );
 
 		await page.goto( `${ SCREEN }&tab=drift` );
-		await driftRow( page, 'options/blogdescription' ).getByRole( 'button', { name: 'Expect this change' } ).click();
+		await driftRow( page, 'options/blogdescription' ).getByRole( 'link', { name: 'Expect this change' } ).click();
 		await expect( page.locator( '.acs-notice' ) ).toContainText( 'Added to the expected list' );
 		await expect( page.locator( '.acs-expected-list' ) ).toContainText( 'options/blogdescription' );
 		expect( exitCode( 'axle-config-sync', 'drift' ) ).toBe( 0 );
@@ -175,7 +174,7 @@ test.describe( 'Drift watch', () => {
 		expect( option( 'acs_fixture_mail' ) ).toBeNull();
 		expect( option( 'acs_fixture_hook' ) ).toBeNull();
 
-		await page.goto( `${ SCREEN }&tab=drift` );
+		await page.goto( `${ SCREEN }&tab=track` );
 		await page.getByLabel( 'Email me when new drift is found' ).check();
 		await page.getByLabel( 'Send to' ).fill( 'ops@example.com' );
 		await page.getByLabel( 'Webhook' ).fill( 'https://8.8.8.8/acs-hook' );

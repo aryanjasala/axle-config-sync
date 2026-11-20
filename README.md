@@ -45,6 +45,7 @@ Settings live in the database, not in files. Moving them from staging to product
 - **Safe files**: nothing from a file is ever unserialized, and the screen and Site Health check the folder is not served over HTTP
 - **WP-CLI** for deploys (`git pull && wp axle-config-sync apply --all --yes`), abilities for agents, REST routes, Site Health, privacy export and erase
 - **Import from WP-CFM**: bring your bundles over in one step, with a preview that maps each item and says why one cannot be mapped. Nothing is applied to the site and WP-CFM's files are left alone
+- **Managed in git, locked on production**: a setting that has a file says "Managed in git" on its own settings screen, in the Customizer and in the site title block, and a save is refused unless someone with the right capability chooses "Change it here anyway" (time-limited, logged, and kept out of drift until the next deploy). WP-CLI, deploys and Config Sync's own apply are never blocked
 
 ## Install
 
@@ -94,11 +95,17 @@ wp axle-config-sync import wp-cfm --dry-run
 wp axle-config-sync import wp-cfm
 ```
 
+On production, a setting that has a file is locked on its settings screen. See what is managed:
+
+```sh
+wp axle-config-sync lock
+```
+
 ## Screenshots
 
 <table>
   <tr>
-    <td width="50%" valign="top"><img src=".wordpress-org/screenshot-1.png" alt="Status: the environment, the config directory and every tracked item with its three-way state"><br><sub>Status: the environment, the config directory and every tracked item with its three-way state</sub></td>
+    <td width="50%" valign="top"><img src=".wordpress-org/screenshot-1.png" alt="Status: every tracked item with its three-way state, and the bulk actions "Apply from files" and "Write to files""><br><sub>Status: every tracked item with its three-way state, and the bulk actions "Apply from files" and "Write to files"</sub></td>
     <td width="50%" valign="top"><img src=".wordpress-org/screenshot-2.png" alt="The preview before an apply: each change before and after, a dangerous change, and the confirmation it needs"><br><sub>The preview before an apply: each change before and after, a dangerous change, and the confirmation it needs</sub></td>
   </tr>
   <tr>
@@ -106,11 +113,12 @@ wp axle-config-sync import wp-cfm
     <td width="50%" valign="top"><img src=".wordpress-org/screenshot-4.png" alt="History: past applies with Undo"><br><sub>History: past applies with Undo</sub></td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><img src=".wordpress-org/screenshot-5.png" alt="Track: which providers and plugin options are synced, and the option finder"><br><sub>Track: which providers and plugin options are synced, and the option finder</sub></td>
-    <td width="50%" valign="top"><img src=".wordpress-org/screenshot-6.png" alt="Drift: settings changed on the live site, who changed them, and the choice to keep or put back"><br><sub>Drift: settings changed on the live site, who changed them, and the choice to keep or put back</sub></td>
+    <td width="50%" valign="top"><img src=".wordpress-org/screenshot-5.png" alt="Track: providers, plugin options, the lock on production, drift alerts and the option finder"><br><sub>Track: providers, plugin options, the lock on production, drift alerts and the option finder</sub></td>
+    <td width="50%" valign="top"><img src=".wordpress-org/screenshot-6.png" alt="Drift: settings changed on the live site, who changed them, the Files and This site values, and the row actions"><br><sub>Drift: settings changed on the live site, who changed them, the Files and This site values, and the row actions</sub></td>
   </tr>
   <tr>
     <td width="50%" valign="top"><img src=".wordpress-org/screenshot-7.png" alt="Import: WP-CFM bundles, how each item maps, and what was left out"><br><sub>Import: WP-CFM bundles, how each item maps, and what was left out</sub></td>
+    <td width="50%" valign="top"><img src=".wordpress-org/screenshot-8.png" alt="Discussion settings on production: a setting managed in git, with the notice and the Change it here anyway button"><br><sub>Discussion settings on production: a setting managed in git, with the notice and the Change it here anyway button</sub></td>
   </tr>
 </table>
 
@@ -145,6 +153,7 @@ src/
 ├── Manifest.php          manifest.json and version checks
 ├── Changesets.php        change sets for undo
 ├── Drift.php             the drift watch, who changed it, alerts
+├── Lock.php              managed in git, locked on production
 ├── Import/WpCfm.php      the WP-CFM import
 ├── Schema.php            the table and the daily purge
 ├── Registry.php          providers and apply order
@@ -155,7 +164,7 @@ src/
 ├── Admin/                Settings > Config Sync
 ├── Health/SiteHealth.php the Site Health tests
 └── Cli/                  wp axle-config-sync, import wp-cfm
-assets/                   admin.css, admin.js
+assets/                   admin.css, admin.js, lock.js, lock.css
 tests/
 ├── Unit/                 PHPUnit
 └── e2e/                  Playwright specs, fixture and the Docker site
@@ -177,15 +186,15 @@ Small plugins that each fill one gap in WordPress, all free with no pro version.
 | <img src="https://raw.githubusercontent.com/aryanjasala/activity-log-with-undo/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Activity Log with Undo](https://github.com/aryanjasala/activity-log-with-undo) | An activity log where every change you can reverse has an Undo button |
 | <img src="https://raw.githubusercontent.com/aryanjasala/agent-governance/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Agent Governance](https://github.com/aryanjasala/agent-governance) | Hold risky AI agent calls for approval, preview what they change, and roll back a session |
 | <img src="https://raw.githubusercontent.com/aryanjasala/axle-ai-guard/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Axle AI Guard](https://github.com/aryanjasala/axle-ai-guard) | See and control every AI call your plugins make: cost, data sent, budgets and a kill switch |
-| <img src="https://raw.githubusercontent.com/aryanjasala/axle-leftovers/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Axle Leftovers](https://github.com/aryanjasala/axle-leftovers) | Find what deleted plugins left behind, see who owns it and why, and clean it up with undo |
+| <img src="https://raw.githubusercontent.com/aryanjasala/axle-leftovers/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Axle Leftovers](https://github.com/aryanjasala/axle-leftovers) | Find what deleted plugins and themes left behind, see who owns it and why, and clean it up with undo |
 | <img src="https://raw.githubusercontent.com/aryanjasala/axle-license-tracker/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Axle License Tracker](https://github.com/aryanjasala/axle-license-tracker) | See which premium plugins are licensed, which lapsed and stopped getting updates, and what renews when |
 | <img src="https://raw.githubusercontent.com/aryanjasala/axle-review/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Axle Review](https://github.com/aryanjasala/axle-review) | Share drafts through private links, collect outside feedback as block Notes, and know when an approval is out of date |
 | <img src="https://raw.githubusercontent.com/aryanjasala/axle-runtime-doctor/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Axle Runtime Doctor](https://github.com/aryanjasala/axle-runtime-doctor) | Check OPcache coverage, the object cache, PHP support and limits, cron and more, with the fix for your host |
 | <img src="https://raw.githubusercontent.com/aryanjasala/axle-smoke-test/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Axle Smoke Test](https://github.com/aryanjasala/axle-smoke-test) | Check key pages after every update or deploy, see what broke and roll it back |
 | <img src="https://raw.githubusercontent.com/aryanjasala/block-doctor/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Block Doctor](https://github.com/aryanjasala/block-doctor) | Scan the site for broken blocks and fix them in bulk, with undo. See which posts use each block before you switch a plugin off |
-| <img src="https://raw.githubusercontent.com/aryanjasala/block-theme-ops/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Block Theme Ops](https://github.com/aryanjasala/block-theme-ops) | Find Site Editor changes that override your theme files, see the diff, reset them or send them to Git |
+| <img src="https://raw.githubusercontent.com/aryanjasala/block-theme-ops/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Block Theme Ops](https://github.com/aryanjasala/block-theme-ops) | Find Site Editor changes that override your theme files, merge a theme update into them, reset them, send them to Git, move them to another site or lock them |
 | <img src="https://raw.githubusercontent.com/aryanjasala/role-right-sizer/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Role Right-Sizer](https://github.com/aryanjasala/role-right-sizer) | Recommends the smallest role each user needs, from what they actually do |
-| <img src="https://raw.githubusercontent.com/aryanjasala/update-rehearsal/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Update Rehearsal](https://github.com/aryanjasala/update-rehearsal) | Try plugin, theme, core and PHP updates on a disposable copy of your site in WordPress Playground first |
+| <img src="https://raw.githubusercontent.com/aryanjasala/update-rehearsal/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [Update Rehearsal](https://github.com/aryanjasala/update-rehearsal) | Try plugin, theme, core and PHP updates, a new plugin, or life without one, on a disposable copy of your site in WordPress Playground first |
 | <img src="https://raw.githubusercontent.com/aryanjasala/user-session-manager/main/.wordpress-org/icon-128x128.png" alt="" width="32"> | [User Session Manager](https://github.com/aryanjasala/user-session-manager) | See every device signed in, sign out one, and limit sessions per role |
 
 ## License

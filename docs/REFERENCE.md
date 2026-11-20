@@ -91,8 +91,8 @@ A setting has drifted when its site side moved after the last export or apply: t
 - New drift raises an admin notice for people who can apply (dismiss it per user, until something else drifts), a Site Health test, and, when you turn them on, an email and a webhook. Each new drift is sent once. Email and webhook are off by default.
 - The email and the webhook carry the item, the value in the files and on the site (secrets masked as `{"$secret":"NAME"}`, long values cut), and who changed it. The webhook gets a JSON `POST` from `wp_safe_remote_post`, so it must be a public http or https URL. This is the only call to another server the plugin makes, and only when you set a webhook.
 - A change to a setting that is covered by the tracking rules records the user ID, the time and where it came from (admin, WP-CLI, cron, REST) in `axle_config_sync_drift_actors`. The hook leaves at once for every other option. The plugin's own apply, undo and export are never recorded. When Activity Log with Undo is active and has an entry for the option, its user and time are used instead. Changes to menus, navigation and widgets are recorded per provider; a change that happened before the item was last synced is ignored.
-- **Write to files** accepts the live value: it runs the normal export for the item and the state moves on. When the config directory is not writable, the screen offers the file to download or copy instead. **Put back from files** is the normal apply: a preview, a change set and undo.
-- The **expected list** holds items a site may change on purpose (an item ID, or a pattern such as `options/woocommerce_*`). They are never reported. Add to it from the screen, `wp axle-config-sync expected add`, or the `axle_config_sync_drift_expected` filter.
+- **Keep site value** (Bulk actions: Keep site values) accepts the live value: it runs the normal export for the item and the state moves on. When the config directory is not writable, the screen offers the file to download or copy instead. **Put back** (a row action, or Bulk actions: Put back from files) is the normal apply: a preview, a change set and undo.
+- The **expected list** holds items a site may change on purpose (an item ID, or a pattern such as `options/woocommerce_*`). They are never reported. Add to it from the screen (the row action **Expect this change**), `wp axle-config-sync expected add`, or the `axle_config_sync_drift_expected` filter.
 
 ```sh
 wp axle-config-sync drift                      # table, exit 1 when anything drifted
@@ -110,7 +110,7 @@ wp axle-config-sync drift --format=ids && git pull && wp axle-config-sync apply 
 
 ## Moving from WP-CFM
 
-WP-CFM was closed on WordPress.org in January 2026. Its bundles are JSON files in `wp-content/config` (`<bundle>.json`, or `blog<ID>-<bundle>.json` on multisite) that map option names to the raw option values as the database holds them, plus a `.label` key. The bundle list (name, label and option names) is also kept as JSON in the `wpcfm_settings` option. The **Import** tab, `wp axle-config-sync import wp-cfm` and the `import-wp-cfm` ability read both, with or without WP-CFM active.
+WP-CFM was closed on WordPress.org in January 2026. Its bundles are JSON files in `wp-content/config` (`<bundle>.json`, or `blog<ID>-<bundle>.json` on multisite) that map option names to the raw option values as the database holds them, plus a `.label` key. The bundle list (name, label and option names) is also kept as JSON in the `wpcfm_settings` option. The **Import from WP-CFM** card on the Status tab, shown only while WP-CFM bundles exist, `wp axle-config-sync import wp-cfm` and the `import-wp-cfm` ability read both, with or without WP-CFM active.
 
 What the import does:
 
@@ -187,7 +187,7 @@ Export refuses to write a file that still has a plain secret (for example one an
 
 ## Environments
 
-The environment is `AXLE_CONFIG_SYNC_ENV` when defined, else `wp_get_environment_type()` (the same source Staging Guard uses), filtered by `axle_config_sync_environment`. `env/<environment>.json` sets values for that environment:
+The environment is `AXLE_CONFIG_SYNC_ENV` when defined, else Axle's shared environment check (`wp_get_environment_type()`, filtered by `axle_environment_type`, which Staging Guard answers on copies), filtered by `axle_config_sync_environment`. `env/<environment>.json` sets values for that environment:
 
 ```json
 {
@@ -219,6 +219,19 @@ The screen applies up to 200 items in one request (`axle_config_sync_apply_batch
 
 With Axle Read-Only Mode freezing the site, apply and undo are refused on the screen, the CLI, the REST route and the abilities (which are annotated destructive).
 
+## Managed in git, locked on production
+
+On production, a setting that is tracked and has a file in the config directory is managed in git. A save through a core settings screen, the Customizer or `/wp/v2/settings` is refused (through `pre_update_option` and a REST check), and the screen says so:
+
+- On Settings > General, Writing, Reading, Discussion, Media, Permalinks and Privacy each managed field gets a "Managed in git" badge, and one notice lists them, each with **Change it here anyway**. In the Customizer a managed control gets a warning. A refused save shows "Not saved" with the same button on the next screen. The block editor shows the refusal as a notice with the button (the shared "ask at the wall" data in `axle_wall`).
+- **Change it here anyway** needs the capability that owns the setting (`manage_options` for the core screens, filtered per option by `axle_config_sync_lock_option_capability`). It lasts 30 minutes by default (5 to 1440, set on the Track tab or with `axle_config_sync_lock_override_minutes`). Only the person who chose it can save during that time. It is written to Activity Log with Undo when that plugin is active, and it fires `axle_config_sync_lock_override_granted`.
+- The setting is added to the expected drift until a deploy: it is not reported as drift, and an apply or a write to files of it ends that.
+- It is never given while Axle Read-Only Mode has frozen the site (Read-Only Mode refuses the save itself, too).
+
+The lock never blocks WP-CLI, WP-Cron, installs, this plugin's own apply and undo (screen, REST, CLI, abilities), or a deploy that defines `AXLE_CONFIG_SYNC_DEPLOYING` as true, and it only looks at requests from a signed-in person. It fails open: when the tracking rules or the config directory cannot be read, nothing is locked. Only environments listed by `axle_config_sync_lock_environments` (default `production`, as `AxleUi::environment_type()` answers it) are locked. Switch it off on the Track tab, with `define( 'AXLE_CONFIG_SYNC_LOCK', false );` or the `axle_config_sync_lock_enabled` filter.
+
+Options only: theme mods, widgets, menus, navigation and roles are not locked, and network options are not covered.
+
 ## Hooks
 
 ### Filters
@@ -226,6 +239,11 @@ With Axle Read-Only Mode freezing the site, apply and undo are refused on the sc
 | Filter | Arguments | Default |
 | --- | --- | --- |
 | `axle_config_sync_capability` | `string $capability` | `manage_options` |
+| `axle_config_sync_lock_enabled` | `bool $enabled` | true, unless switched off on the Track tab or by `AXLE_CONFIG_SYNC_LOCK` |
+| `axle_config_sync_lock_environments` | `string[] $environments` | `production` |
+| `axle_config_sync_lock_managed` | `bool $managed, string $option` | true when the option is tracked and has a file |
+| `axle_config_sync_lock_option_capability` | `string $capability, string $option` | `manage_options` |
+| `axle_config_sync_lock_override_minutes` | `int $minutes` | 30 (5 to 1440) |
 | `axle_config_sync_directory` | `string $path` | `wp-content/axle-config` or `AXLE_CONFIG_SYNC_DIR` |
 | `axle_config_sync_site_directory` | `string $folder, int $blog_id` | `sites/<blog_id>` |
 | `axle_config_sync_probe_url` | `string $url` | URL of the probe file |
@@ -279,6 +297,8 @@ add_filter( 'axle_config_sync_capability', fn () => 'manage_network_options' );
 | Action | Arguments |
 | --- | --- |
 | `axle_config_sync_exported` | `array $items, string $directory` |
+| `axle_config_sync_lock_refused` | `string $option, int $user_id` |
+| `axle_config_sync_lock_override_granted` | `string $option, int $until, int $user_id` |
 | `axle_config_sync_apply_started` | `int $changeset_id, string[] $items` |
 | `axle_config_sync_item_applied` | `string $id, mixed $before, mixed $after` |
 | `axle_config_sync_item_skipped` | `string $id, string $reason` |
@@ -342,14 +362,15 @@ A provider implements `AryanX\Axle\ConfigSync\Providers\Provider`: `items()`, `e
 | `axle-config-sync/apply-config` | destructive | same as preview |
 | `axle-config-sync/undo-apply` | destructive | `changeset`, `force` |
 | `axle-config-sync/get-drift` | readonly | none |
+| `axle-config-sync/get-lock-status` | readonly | none |
 | `axle-config-sync/preview-wp-cfm-import` | readonly | `bundles` |
 | `axle-config-sync/import-wp-cfm` | idempotent | `bundles` |
 
-Permission: the `axle_config_sync_capability` capability.
+Permission: the `axle_config_sync_capability` capability. No ability can choose "Change it here anyway": that is a person's decision on a settings screen.
 
 ## REST
 
-`axle-config-sync/v1`: `GET /status`, `GET /drift`, `POST /apply` (`items`, `allow_dangerous`, `force`, `inactive_theme`, `changeset`), `POST /undo/<id>` (`force`). Same capability.
+`axle-config-sync/v1`: `GET /status`, `GET /drift`, `GET /lock`, `POST /lock/override` (`option`; needs the capability that owns the setting, not the Config Sync capability), `POST /apply` (`items`, `allow_dangerous`, `force`, `inactive_theme`, `changeset`), `POST /undo/<id>` (`force`). Same capability.
 
 ## WP-CLI
 
@@ -368,6 +389,7 @@ Permission: the `axle_config_sync_capability` capability.
 | `wp axle-config-sync env` | The environment and where it came from |
 | `wp axle-config-sync drift [--check] [--format=]` | Settings changed on the site after their files were written. Exit 1 when any. `--check` runs the full check and sends alerts |
 | `wp axle-config-sync expected list\|add\|remove [<item>...]` | The expected list |
+| `wp axle-config-sync lock [status\|end] [--format=]` | The managed settings and open overrides, or end every open override. WP-CLI itself is never locked |
 | `wp axle-config-sync drift-alerts [--email=on\|off] [--email-to=] [--webhook=]` | Show or set the email and webhook |
 | `wp axle-config-sync import wp-cfm [--bundle=] [--dry-run] [--format=]` | Import WP-CFM bundles as Config Sync files |
 
@@ -377,6 +399,7 @@ Permission: the `axle_config_sync_capability` capability.
 - Critical: a file holds a secret in plain text.
 - Recommended: items conflict.
 - Recommended: settings drifted from the files (from the last check).
+- Recommended: settings have files in git on production, but the lock is off.
 - Recommended: the directory could not be checked and the server is nginx.
 
 ## Data and privacy
@@ -387,15 +410,18 @@ Permission: the `axle_config_sync_capability` capability.
 - `axle_config_sync_drift_actors` (not autoloaded): who changed a tracked setting last, and when. A user ID and a time per item, 300 at most. Records of items that no longer drift are removed after the retention period.
 - `axle_config_sync_settings` also holds the expected list and the alert settings under `drift`.
 - User meta `axle_config_sync_drift_seen` and `axle_config_sync_steps_dismissed`: what a user dismissed.
+- `axle_config_sync_lock_settings` (not autoloaded): the lock switch and how many minutes "Change it here anyway" lasts.
+- `axle_config_sync_lock_overrides` (not autoloaded): per option, when the window ends, who chose it and when. `axle_config_sync_lock_released` (not autoloaded): the items changed here anyway, kept out of drift until a deploy. Both hold a user ID.
 - `axle_config_sync_db_version`, the transient `axle_config_sync_reachable`.
 - Table `{prefix}axle_config_sync_changesets`: id, created_gmt, user_id, via, environment, items_count, status, undo_of, payload.
 - Cron `axle_config_sync_purge` and `axle_config_sync_drift_check`, both daily.
 
-The privacy exporter lists a user's change sets and drift records; the eraser sets their user to 0 and keeps the history. If you turn on the drift email or webhook, the changed settings (secrets masked) go to the address or server you set. Uninstall removes the options, the user meta, the table, the cron events and transients. It never deletes the config directory: that is your data in git.
+The privacy exporter lists a user's change sets, drift records and "Change it here anyway" records; the eraser sets their user to 0 and keeps the history. If you turn on the drift email or webhook, the changed settings (secrets masked) go to the address or server you set. Uninstall removes the options (including the lock's), the user meta, the table, the cron events and transients. It never deletes the config directory: that is your data in git.
 
 ## Not in 1.0
 
 - Network options (`wp_sitemeta`) on multisite, and WP-CFM network bundles.
+- The lock for theme mods, widgets, menus, navigation and roles (options only for now).
 - The active plugins list.
 - Content, templates, template parts and global styles (Block Theme Ops).
 - Settings in custom tables (WooCommerce tax rates, form plugins), which third-party providers can add.

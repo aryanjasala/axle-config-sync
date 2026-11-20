@@ -19,14 +19,23 @@ function exitCode( ...args ) {
 /** The row of an item on the Status tab. */
 const statusRow = ( page, id ) => page.locator( `.acs-items tr[data-item="${ id }"]` );
 
-/** Picks items on the Apply tab and opens the preview. */
+/** Picks items on Status, chooses "Apply from files" and opens the preview. */
 async function preview( page, ids ) {
-	await page.goto( `${ SCREEN }&tab=apply` );
+	await page.goto( SCREEN );
 	for ( const id of ids ) {
 		await page.locator( `input[name="items[]"][value="${ id }"]` ).check();
 	}
-	await page.getByRole( 'button', { name: 'Preview' } ).click();
+	await page.getByLabel( 'Bulk actions' ).selectOption( 'apply' );
+	await page.locator( '#acs-bulk-go' ).click();
 	await expect( page.getByRole( 'heading', { name: 'Preview' } ) ).toBeVisible();
+}
+
+/** Ticks every item on Status and writes them to the files. */
+async function writeAllToFiles( page ) {
+	await page.goto( SCREEN );
+	await page.locator( '#acs-select-all' ).check();
+	await page.getByLabel( 'Bulk actions' ).selectOption( 'export' );
+	await page.locator( '#acs-bulk-go' ).click();
 }
 
 /** Applies from the preview, through the in-place confirm step. */
@@ -54,8 +63,7 @@ test.describe( 'Axle Config Sync', () => {
 	test( 'export, status, apply and undo the site title', async ( { page } ) => {
 		wp( 'option', 'update', 'blogname', 'Bean There' );
 
-		await page.goto( `${ SCREEN }&tab=export` );
-		await page.getByRole( 'button', { name: 'Export all tracked items' } ).click();
+		await writeAllToFiles( page );
 		await expect( page.locator( '.acs-notice' ) ).toContainText( 'Wrote' );
 		expect( readFile( 'options/blogname.json' ) ).toEqual( { schema: 1, provider: 'options', id: 'options/blogname', owner: 'core', value: 'Bean There' } );
 		expect( readFile( 'manifest.json' ).environment ).toBe( 'production' );
@@ -291,7 +299,7 @@ test.describe( 'Axle Config Sync', () => {
 		await page.goto( SCREEN );
 		await page.locator( '#contextual-help-link' ).click();
 		const tabs = page.locator( '#contextual-help-wrap .contextual-help-tabs li' );
-		await expect( tabs ).toHaveText( [ 'Overview', 'Status and apply', 'Drift', 'Export and import', 'Track', 'History and undo' ] );
+		await expect( tabs ).toHaveText( [ 'Overview', 'Status and apply', 'Drift', 'Track', 'History and undo' ] );
 		await tabs.nth( 2 ).locator( 'a' ).click();
 		await expect( page.locator( '#tab-panel-axle-config-sync-drift' ) ).toContainText( 'put the files back' );
 	} );
@@ -432,10 +440,11 @@ test.describe( 'Axle Config Sync', () => {
 			try {
 				expect( exitCode( 'axle-config-sync', 'apply', 'blogname', '--yes' ) ).toBe( 1 );
 
-				await page.goto( `${ SCREEN }&tab=apply` );
+				await page.goto( SCREEN );
 				await expect( page.locator( '.acs-page' ) ).toContainText( 'Axle Read-Only Mode has frozen this site' );
 				await page.locator( 'input[name="items[]"][value="options/blogname"]' ).check();
-				await page.getByRole( 'button', { name: 'Preview' } ).click();
+				await page.getByLabel( 'Bulk actions' ).selectOption( 'apply' );
+				await page.locator( '#acs-bulk-go' ).click();
 				// The freeze stops the form itself.
 				await expect( page.locator( 'body' ) ).toContainText( 'frozen' );
 

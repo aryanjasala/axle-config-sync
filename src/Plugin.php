@@ -59,6 +59,13 @@ final class Plugin {
 	private WpCfm $wpcfm;
 
 	/**
+	 * The "managed in git" lock.
+	 *
+	 * @var Lock
+	 */
+	private Lock $lock;
+
+	/**
 	 * Starts the plugin. Runs on `plugins_loaded`.
 	 */
 	public static function boot(): void {
@@ -87,6 +94,16 @@ final class Plugin {
 		$this->engine     = new Engine( $directory, $rules, new State(), $this->changesets, new Registry( $rules ) );
 		$this->drift      = new Drift( $this->engine );
 		$this->wpcfm      = new WpCfm( $this->engine );
+		$this->lock       = new Lock( $this->engine );
+	}
+
+	/**
+	 * The lock that keeps managed settings from being changed on production.
+	 *
+	 * @return Lock
+	 */
+	public function lock(): Lock {
+		return $this->lock;
 	}
 
 	/**
@@ -125,12 +142,13 @@ final class Plugin {
 		$services = array(
 			$this->changesets,
 			$this->drift,
-			new Page( $this->engine, $this->drift, $this->wpcfm ),
+			$this->lock,
+			new Page( $this->engine, $this->drift, $this->wpcfm, $this->lock ),
 			new DriftNotice( $this->drift ),
 			new Controller( $this->engine, $this->drift ),
-			new Abilities( $this->engine, $this->drift, $this->wpcfm ),
-			new SiteHealth( $this->engine, $this->drift ),
-			new Privacy( $this->changesets, $this->engine->state(), $this->drift ),
+			new Abilities( $this->engine, $this->drift, $this->wpcfm, $this->lock ),
+			new SiteHealth( $this->engine, $this->drift, $this->lock ),
+			new Privacy( $this->changesets, $this->engine->state(), $this->drift, $this->lock ),
 		);
 
 		foreach ( $services as $service ) {
@@ -138,7 +156,7 @@ final class Plugin {
 		}
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
-			\WP_CLI::add_command( 'axle-config-sync', new Command( $this->engine, $this->drift ) );
+			\WP_CLI::add_command( 'axle-config-sync', new Command( $this->engine, $this->drift, $this->lock ) );
 			\WP_CLI::add_command( 'axle-config-sync import', new ImportCommand( $this->wpcfm ) );
 			\WP_CLI::add_command( 'axle-config-sync secrets', new SecretsCommand( $this->engine ) );
 		}

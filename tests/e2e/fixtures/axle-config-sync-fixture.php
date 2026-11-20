@@ -13,7 +13,7 @@ add_filter( 'wp_is_application_passwords_available', '__return_true' );
 
 // Constants a real site sets in wp-config.php: secrets and the environment name.
 foreach ( (array) get_option( 'acs_fixture_constants', array() ) as $acs_name => $acs_value ) {
-	if ( is_string( $acs_name ) && preg_match( '/^(AXLE_SECRET_[A-Z0-9_]+|AXLE_CONFIG_SYNC_ENV)$/', $acs_name ) && ! defined( $acs_name ) ) {
+	if ( is_string( $acs_name ) && preg_match( '/^(AXLE_SECRET_[A-Z0-9_]+|AXLE_CONFIG_SYNC_ENV|WP_ENVIRONMENT_TYPE)$/', $acs_name ) && ! defined( $acs_name ) ) {
 		define( $acs_name, (string) $acs_value );
 	}
 }
