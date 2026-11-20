@@ -604,6 +604,9 @@
           "js": "seed.js",
           "call": "unseedSite"
         }
+      ],
+      "exclude": [
+        ".description code"
       ]
     },
     {
@@ -653,6 +656,9 @@
           "js": "seed.js",
           "call": "unseedSite"
         }
+      ],
+      "exclude": [
+        ".description code"
       ]
     }
   ],
