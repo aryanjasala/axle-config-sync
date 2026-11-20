@@ -126,3 +126,58 @@
 .acs-toolbar-note {
 	color: var(--axle-muted);
 }
+
+/* Bulk bar above a list, like Posts. */
+.acs-tablenav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 16px;
+	align-items: center;
+	height: auto;
+	margin: 8px 0;
+}
+
+.acs-tablenav .actions {
+	float: none;
+	padding: 0;
+}
+
+.acs-inactive {
+	margin-left: 8px;
+}
+
+/* Row actions: always visible links under the item, so touch and keyboard users find them. */
+.acs-row-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0 8px;
+	margin: 4px 0 0;
+	padding: 0;
+	list-style: none;
+}
+
+.acs-row-actions li {
+	margin: 0;
+}
+
+.acs-row-actions li + li::before {
+	content: "|";
+	margin-right: 8px;
+	color: var(--axle-muted);
+}
+
+.acs-row-actions .button-link {
+	text-decoration: underline;
+}
+
+.acs-alerts-line {
+	margin: 8px 0 16px;
+}
+
+.acs-drift .axle-diff--labelled {
+	min-width: 12em;
+}
+
+.acs-lock .axle-facts {
+	margin-bottom: 8px;
+}

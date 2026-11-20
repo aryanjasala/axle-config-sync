@@ -22,9 +22,9 @@ test( 'demo: a setting changed in git is previewed, applied and undone', async (
 			await demo.pause( 1500 );
 
 			// Pick them and preview.
-			await demo.click( page.getByRole( 'link', { name: 'Apply', exact: true } ), 300 );
-			await demo.click( page.locator( '[data-acs-select="state:changed_in_files"]' ), 300 );
-			await demo.click( page.getByRole( 'button', { name: 'Preview' } ), 300 );
+			await demo.click( page.locator( '#acs-select-all' ), 300 );
+			await page.getByLabel( 'Bulk actions' ).selectOption( 'apply' );
+			await demo.click( page.locator( '#acs-bulk-go' ), 300 );
 			await expect( page.locator( '.acs-confirm' ) ).toBeVisible();
 			await demo.moveTo( page.locator( '.acs-diff' ).first() );
 			await demo.pause( 2500 );

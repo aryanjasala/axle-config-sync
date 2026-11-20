@@ -49,13 +49,22 @@ You set `comments off` in the files. Production has had them on since Tuesday, a
 * A **daily check** (and one on demand) compares the live values with the files. A setting has drifted when it changed on the site after the files were written.
 * New drift raises an **admin notice** for people who can apply, a **Site Health** test, and, if you turn them on, an **email** and a **webhook**. Both are off by default. Each message lists the item, the value in the files and on the site (secrets masked), and who changed it.
 * **Who changed it**: the plugin records the user and time when a tracked setting changes, with a cheap hook that ignores every other option. If Activity Log with Undo is active, its entry is used instead.
-* **Keep or put back**, for one item or all: "Write to files" accepts the live value (when the folder cannot be written, you get the file to download or copy), and "Put back from files" is the normal apply with a preview and undo.
+* **Keep or put back**: "Keep site value" accepts the live value (when the folder cannot be written, you get the file to download or copy), and "Put back" is the normal apply with a preview and undo. Tick rows and use one bulk action for several.
 * An **expected list** holds settings a site may change on purpose. They are never reported.
 * `wp axle-config-sync drift` exits with 1 when anything drifted, so a deploy script can stop before it overwrites a live change.
 
+= Managed in git, locked on production =
+
+A client turns comments back on in Settings > Discussion, and next week's deploy silently turns them off again. The lock stops that when the change is made, not a day later.
+
+* On production, a setting that has a file in your config folder says **Managed in git** on its own settings screen, in the Customizer and in the site title block. A save is refused with a notice.
+* **Change it here anyway** is there for a real emergency. It needs the capability that owns the setting, lasts 30 minutes by default, only the person who chose it can save in that time, and it is logged (in Activity Log with Undo when that plugin is active). Until the next deploy puts the file value back, the setting is not reported as drift.
+* WP-CLI, deploys and Config Sync's own apply are never blocked, and neither is anything while a staging copy runs. If the tracking rules or the folder cannot be read, nothing is locked. Axle Read-Only Mode is respected: no override is given during a freeze.
+* Switch it off on the Track tab, or with `define( 'AXLE_CONFIG_SYNC_LOCK', false );`. Options only for now: theme mods, widgets and menus are not locked.
+
 = Coming from WP-CFM? =
 
-WP-CFM was closed on WordPress.org in January 2026, and your deploy script may still call `wp config pull`. The Import tab and `wp axle-config-sync import wp-cfm` read your bundles (the files in `wp-content/config` and the bundle list in the database, with or without WP-CFM active), show how each item maps and which cannot be mapped and why, and write Config Sync files. Nothing is applied to the site, and WP-CFM's files are left alone. Serialized values are decoded without loading any class; a value that holds a PHP object is left out with a reason. The reference has the commands side by side.
+WP-CFM was closed on WordPress.org in January 2026, and your deploy script may still call `wp config pull`. The Import card on the Status tab (shown while WP-CFM bundles exist) and `wp axle-config-sync import wp-cfm` read your bundles (the files in `wp-content/config` and the bundle list in the database, with or without WP-CFM active), show how each item maps and which cannot be mapped and why, and write Config Sync files. Nothing is applied to the site, and WP-CFM's files are left alone. Serialized values are decoded without loading any class; a value that holds a PHP object is left out with a reason. The reference has the commands side by side.
 
 = Safe to apply =
 
@@ -110,7 +119,7 @@ Add the item (or `item#/json/pointer`) under "Not secrets" on the Track tab. The
 
 = What about WP-CFM bundles? =
 
-Import them on the Import tab or with `wp axle-config-sync import wp-cfm --dry-run` and then without `--dry-run`. Options map one to one. Widgets, menus and roles are left out with the reason, because Config Sync keeps them as their own items: run `wp axle-config-sync export --all` on the live site for those. `wp config pull all` in a deploy script becomes `wp axle-config-sync apply --all --yes`.
+Import them from the card on the Status tab or with `wp axle-config-sync import wp-cfm --dry-run` and then without `--dry-run`. Options map one to one. Widgets, menus and roles are left out with the reason, because Config Sync keeps them as their own items: run `wp axle-config-sync export --all` on the live site for those. `wp config pull all` in a deploy script becomes `wp axle-config-sync apply --all --yes`.
 
 = Who changed a setting, if I do not have Activity Log with Undo? =
 
@@ -119,6 +128,14 @@ Config Sync records the user and the time when a tracked setting changes. A chan
 = Does the drift email or webhook send my secrets? =
 
 No. Values are masked the same way as in the files: a secret shows as `{"$secret":"NAME"}`. Long values are cut at 200 characters (`axle_config_sync_drift_value_length`). Both channels are off until you turn them on.
+
+= Can I still change a managed setting on production? =
+
+Yes. Choose "Change it here anyway" on the settings screen (or in the notice after a refused save), then save again within the time window. The setting is not reported as drift until the next deploy. The fix that lasts is to change the file.
+
+= Does the lock stop WP-CLI or my deploy? =
+
+No. WP-CLI, cron, installs, Config Sync's own apply and undo, and a deploy that defines `AXLE_CONFIG_SYNC_DEPLOYING` are never blocked. The lock only looks at signed-in people using a settings screen, the Customizer or the settings REST route on production.
 
 = Does it work on multisite? =
 
@@ -130,19 +147,20 @@ Activating plugins from a file is a big lever for anyone who can push to the rep
 
 == Screenshots ==
 
-1. Status: the environment, the config directory and every tracked item with its three-way state.
+1. Status: every tracked item with its three-way state, and the bulk actions "Apply from files" and "Write to files".
 2. The preview before an apply: each change before and after, a dangerous change, and the confirmation it needs.
 3. One item's difference between the file and the site.
 4. History: past applies with Undo.
-5. Track: which providers and plugin options are synced, and the option finder.
-6. Drift: settings changed on the live site, who changed them, and the choice to keep or put back.
+5. Track: providers, plugin options, the lock on production, drift alerts and the option finder.
+6. Drift: settings changed on the live site, who changed them, the Files and This site values, and the row actions.
 7. Import: WP-CFM bundles, how each item maps, and what was left out.
+8. Discussion settings on production: a setting managed in git, with the notice and the Change it here anyway button.
 
 == External services ==
 
 This plugin makes no external calls unless you ask for one. It sends one request to its own site, to check whether the config directory is served over HTTP.
 
-The drift webhook is the only call to another server. It is off until you enter an address under Settings > Config Sync > Drift > Alerts. When you do, the plugin sends a JSON POST to that address for each new drift. The body holds the site URL, the environment name, and for each drifted setting its ID, label, the value in the files and on the site (secrets masked, long values cut), who changed it and when. The service you point it at has its own terms and privacy policy. The drift email goes through your site's normal mail setup.
+The drift webhook is the only call to another server. It is off until you enter an address under Settings > Config Sync > Track > Alerts. When you do, the plugin sends a JSON POST to that address for each new drift. The body holds the site URL, the environment name, and for each drifted setting its ID, label, the value in the files and on the site (secrets masked, long values cut), who changed it and when. The service you point it at has its own terms and privacy policy. The drift email goes through your site's normal mail setup.
 
 == Changelog ==
 

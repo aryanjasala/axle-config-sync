@@ -11,6 +11,7 @@ use AryanX\Axle\ConfigSync\Admin\Page;
 use AryanX\Axle\ConfigSync\Directory;
 use AryanX\Axle\ConfigSync\Drift;
 use AryanX\Axle\ConfigSync\Engine;
+use AryanX\Axle\ConfigSync\Lock;
 use AryanX\Axle\ConfigSync\Service;
 
 defined( 'ABSPATH' ) || exit;
@@ -37,14 +38,23 @@ final class SiteHealth implements Service {
 	private Drift $drift;
 
 	/**
+	 * The lock.
+	 *
+	 * @var Lock|null
+	 */
+	private ?Lock $lock;
+
+	/**
 	 * Sets up the tests.
 	 *
-	 * @param Engine $engine The engine.
-	 * @param Drift  $drift  The drift watch.
+	 * @param Engine    $engine The engine.
+	 * @param Drift     $drift  The drift watch.
+	 * @param Lock|null $lock   The lock.
 	 */
-	public function __construct( Engine $engine, Drift $drift ) {
+	public function __construct( Engine $engine, Drift $drift, ?Lock $lock = null ) {
 		$this->engine = $engine;
 		$this->drift  = $drift;
+		$this->lock   = $lock;
 	}
 
 	/**
@@ -79,7 +89,62 @@ final class SiteHealth implements Service {
 			'test'  => array( $this, 'test_conflicts' ),
 		);
 
+		if ( $this->lock ) {
+			$tests['direct']['axle_config_sync_lock'] = array(
+				'label' => __( 'Settings managed in git are locked on production', 'axle-config-sync' ),
+				'test'  => array( $this, 'test_lock' ),
+			);
+		}
+
 		return $tests;
+	}
+
+	/**
+	 * Whether settings that git owns are locked on production.
+	 *
+	 * @return array
+	 */
+	public function test_lock(): array {
+		if ( ! $this->lock || ! $this->lock->production() ) {
+			return $this->result( 'good', __( 'Settings managed in git are locked on production', 'axle-config-sync' ), '<p>' . esc_html__( 'This site is not production, so settings stay editable here.', 'axle-config-sync' ) . '</p>', 'axle_config_sync_lock' );
+		}
+
+		$managed = $this->lock->managed_names();
+		if ( ! $managed ) {
+			return $this->result( 'good', __( 'Settings managed in git are locked on production', 'axle-config-sync' ), '<p>' . esc_html__( 'No setting has a file in the config directory yet, so nothing is managed in git.', 'axle-config-sync' ) . '</p>', 'axle_config_sync_lock' );
+		}
+
+		if ( ! $this->lock->enabled() ) {
+			return $this->result(
+				'recommended',
+				__( 'Settings managed in git are not locked on production', 'axle-config-sync' ),
+				'<p>' . esc_html(
+					sprintf(
+						/* translators: %d: number of settings. */
+						_n( '%d setting has a file in git, but the lock is off, so anyone who can open Settings can change it and the next deploy overwrites it.', '%d settings have a file in git, but the lock is off, so anyone who can open Settings can change them and the next deploy overwrites them.', count( $managed ), 'axle-config-sync' ),
+						count( $managed )
+					)
+				) . '</p><p>' . sprintf(
+					'<a href="%1$s">%2$s</a>',
+					esc_url( Page::url( 'track' ) ),
+					esc_html__( 'Turn the lock on in Track', 'axle-config-sync' )
+				) . '</p>',
+				'axle_config_sync_lock'
+			);
+		}
+
+		return $this->result(
+			'good',
+			__( 'Settings managed in git are locked on production', 'axle-config-sync' ),
+			'<p>' . esc_html(
+				sprintf(
+					/* translators: %d: number of settings. */
+					_n( '%d setting is managed in git and cannot be saved from a settings screen on production.', '%d settings are managed in git and cannot be saved from a settings screen on production.', count( $managed ), 'axle-config-sync' ),
+					count( $managed )
+				)
+			) . '</p>',
+			'axle_config_sync_lock'
+		);
 	}
 
 	/**

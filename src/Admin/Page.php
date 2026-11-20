@@ -11,6 +11,7 @@ use AryanX\Axle\ConfigSync\Drift;
 use AryanX\Axle\ConfigSync\Engine;
 use AryanX\Axle\ConfigSync\Environment;
 use AryanX\Axle\ConfigSync\Import\WpCfm;
+use AryanX\Axle\ConfigSync\Lock;
 use AryanX\Axle\ConfigSync\Messages;
 use AryanX\Axle\ConfigSync\Providers\Options;
 use AryanX\Axle\ConfigSync\Rules;
@@ -23,14 +24,24 @@ use const AryanX\Axle\ConfigSync\VERSION;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * The screen with seven tabs: Status, Drift, Apply, Export, Import, Track and History.
+ * The screen with four tabs: Status (apply from files, write to files and the
+ * WP-CFM import card), Drift, Track and History.
  * Forms that change something post to admin-post.php and come back with a
  * notice. Views live in View.
  */
 final class Page implements Service {
 
 	public const SLUG = 'axle-config-sync';
-	public const TABS = array( 'status', 'drift', 'apply', 'export', 'import', 'track', 'history' );
+	public const TABS = array( 'status', 'drift', 'track', 'history' );
+
+	/**
+	 * Tabs that older links and bookmarks still use, and the tab each lives in now.
+	 */
+	public const LEGACY = array(
+		'apply'  => 'status',
+		'export' => 'status',
+		'import' => 'status',
+	);
 
 	/**
 	 * The engine.
@@ -54,16 +65,25 @@ final class Page implements Service {
 	private WpCfm $wpcfm;
 
 	/**
+	 * The lock.
+	 *
+	 * @var Lock|null
+	 */
+	private ?Lock $lock;
+
+	/**
 	 * Sets up the screen.
 	 *
-	 * @param Engine $engine The engine.
-	 * @param Drift  $drift  The drift watch.
-	 * @param WpCfm  $wpcfm  The WP-CFM importer.
+	 * @param Engine    $engine The engine.
+	 * @param Drift     $drift  The drift watch.
+	 * @param WpCfm     $wpcfm  The WP-CFM importer.
+	 * @param Lock|null $lock   The lock.
 	 */
-	public function __construct( Engine $engine, Drift $drift, WpCfm $wpcfm ) {
+	public function __construct( Engine $engine, Drift $drift, WpCfm $wpcfm, ?Lock $lock = null ) {
 		$this->engine = $engine;
 		$this->drift  = $drift;
 		$this->wpcfm  = $wpcfm;
+		$this->lock   = $lock;
 	}
 
 	/**
@@ -72,7 +92,7 @@ final class Page implements Service {
 	public function register(): void {
 		add_action( 'admin_menu', array( $this, 'add_page' ) );
 		add_filter( 'plugin_action_links_' . plugin_basename( PLUGIN_FILE ), array( $this, 'action_links' ) );
-		foreach ( array( 'apply', 'export', 'track', 'track_add', 'undo', 'drift_check', 'drift_keep', 'drift_expect', 'drift_notify', 'drift_download', 'import', 'dismiss_steps', 'recheck' ) as $action ) {
+		foreach ( array( 'apply', 'export', 'bulk', 'track', 'track_add', 'lock_settings', 'undo', 'drift_check', 'drift_keep', 'drift_bulk', 'drift_expect', 'drift_expect_link', 'drift_notify', 'drift_download', 'import', 'dismiss_steps', 'recheck' ) as $action ) {
 			add_action( 'admin_post_axle_config_sync_' . $action, array( $this, 'handle_' . $action ) );
 		}
 	}
@@ -100,6 +120,11 @@ final class Page implements Service {
 	 * @return string
 	 */
 	public static function url( string $tab = 'status', array $args = array() ): string {
+		if ( 'import' === $tab ) {
+			$args['view'] = 'import';
+		}
+		$tab = self::LEGACY[ $tab ] ?? $tab;
+
 		return add_query_arg(
 			array_merge(
 				array(
@@ -137,7 +162,7 @@ final class Page implements Service {
 				array(
 					'id'      => 'status',
 					'title'   => __( 'Status and apply', 'axle-config-sync' ),
-					'content' => '<p>' . esc_html__( 'Status shows each setting as in sync, changed in files, changed on site, or both (a conflict). Apply copies file values onto this site after a preview with before and after.', 'axle-config-sync' ) . '</p><p>' . esc_html__( 'Dangerous changes, such as a new default role, need an extra tick before they apply.', 'axle-config-sync' ) . '</p>',
+					'content' => '<p>' . esc_html__( 'Status shows each setting as in sync, changed in files, changed on site, or both (a conflict). Tick items and choose "Apply from files" to copy file values onto this site after a preview with before and after, or "Write to files" to write the live values to the files. If this site has WP-CFM bundles, a card offers to import them: it never changes the site.', 'axle-config-sync' ) . '</p><p>' . esc_html__( 'Dangerous changes, such as a new default role, need an extra tick before they apply.', 'axle-config-sync' ) . '</p>',
 				),
 				array(
 					'id'      => 'drift',
@@ -145,14 +170,9 @@ final class Page implements Service {
 					'content' => '<p>' . esc_html__( 'Drift is a setting someone changed on this site after the files were written. A daily check finds it and, when you turn it on, emails you or calls a webhook.', 'axle-config-sync' ) . '</p><p>' . esc_html__( 'For each item you can keep the live value (write it to the files) or put the files back (apply with a preview). Settings a site changes on purpose go on the expected list and are never reported.', 'axle-config-sync' ) . '</p>',
 				),
 				array(
-					'id'      => 'export',
-					'title'   => __( 'Export and import', 'axle-config-sync' ),
-					'content' => '<p>' . esc_html__( 'Export writes the live values to the files. Import brings WP-CFM bundles over: it shows how each item maps and what cannot be mapped, then writes Config Sync files. It never changes the site.', 'axle-config-sync' ) . '</p>',
-				),
-				array(
 					'id'      => 'track',
 					'title'   => __( 'Track', 'axle-config-sync' ),
-					'content' => '<p>' . esc_html__( 'The core settings screens are always tracked. Add plugin options by name or with a prefix_* pattern, and turn providers on or off. The rules are saved in the config directory, so git has them too.', 'axle-config-sync' ) . '</p>',
+					'content' => '<p>' . esc_html__( 'The core settings screens are always tracked. Add plugin options by name or with a prefix_* pattern, and turn providers on or off. The rules are saved in the config directory, so git has them too.', 'axle-config-sync' ) . '</p><p>' . esc_html__( 'On production, a tracked setting that has a file is managed in git and cannot be saved from its settings screen unless someone chooses "Change it here anyway". The lock switch, that window and the drift alerts are on this tab.', 'axle-config-sync' ) . '</p>',
 				),
 				array(
 					'id'      => 'history',
@@ -199,8 +219,23 @@ final class Page implements Service {
 	public static function tab(): string {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only tab switch.
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'status';
+		$tab = self::LEGACY[ $tab ] ?? $tab;
 
 		return in_array( $tab, self::TABS, true ) ? $tab : 'status';
+	}
+
+	/**
+	 * The view inside the Status tab: the list, or the WP-CFM import.
+	 *
+	 * @return string status or import.
+	 */
+	public static function view(): string {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only view switch.
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only view switch.
+		$view = isset( $_GET['view'] ) ? sanitize_key( wp_unslash( $_GET['view'] ) ) : '';
+
+		return 'import' === $tab || 'import' === $view ? 'import' : 'status';
 	}
 
 	/**
@@ -211,7 +246,7 @@ final class Page implements Service {
 			wp_die( esc_html__( 'Sorry, you are not allowed to access this page.', 'axle-config-sync' ), 403 );
 		}
 
-		$view = new View( $this->engine, $this->drift, $this->wpcfm );
+		$view = new View( $this->engine, $this->drift, $this->wpcfm, $this->lock );
 		$view->render( self::tab(), $this->take_notice() );
 	}
 
@@ -273,6 +308,55 @@ final class Page implements Service {
 		$zip = ! empty( $_POST['zip'] );
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
+		$this->write_files( $all, $ids, $zip );
+	}
+
+	/**
+	 * Status: the bulk actions on the list, "Apply from files" and "Write to files".
+	 */
+	public function handle_bulk(): void {
+		$this->guard( 'axle_config_sync_bulk' );
+
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Checked in guard().
+		$do  = isset( $_POST['bulk'] ) ? sanitize_key( wp_unslash( $_POST['bulk'] ) ) : '';
+		$ids = isset( $_POST['items'] ) ? array_map( 'sanitize_text_field', (array) wp_unslash( $_POST['items'] ) ) : array();
+		$old = ! empty( $_POST['inactive_theme'] );
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+		if ( ! in_array( $do, array( 'apply', 'export', 'zip' ), true ) ) {
+			$this->done( 'error', __( 'Choose a bulk action first.', 'axle-config-sync' ), 'status' );
+			return;
+		}
+		if ( ! $ids ) {
+			$this->done( 'error', __( 'Tick the items first.', 'axle-config-sync' ), 'status' );
+			return;
+		}
+
+		if ( 'export' === $do || 'zip' === $do ) {
+			$this->write_files( false, $ids, 'zip' === $do );
+			return;
+		}
+
+		$args = array(
+			'step'     => 'preview',
+			'items'    => $ids,
+			'_wpnonce' => wp_create_nonce( 'axle_config_sync_preview' ),
+		);
+		if ( $old ) {
+			$args['inactive_theme'] = 1;
+		}
+		wp_safe_redirect( self::url( 'status', $args ) );
+		exit;
+	}
+
+	/**
+	 * Writes live values to files, or sends them as a zip.
+	 *
+	 * @param bool     $all Every tracked item.
+	 * @param string[] $ids Item IDs.
+	 * @param bool     $zip Download a zip instead.
+	 */
+	private function write_files( bool $all, array $ids, bool $zip ): void {
 		if ( ! $all && ! $ids ) {
 			$this->done( 'error', __( 'Pick the items to export, or export all tracked items.', 'axle-config-sync' ), 'export' );
 			return;
@@ -310,7 +394,7 @@ final class Page implements Service {
 
 		$this->done(
 			$type,
-			$message . ' ' . __( 'Git shows what changed in them.', 'axle-config-sync' ),
+			$message . ' ' . __( 'Git shows what changed in them, and can put the old contents back.', 'axle-config-sync' ),
 			'export',
 			array(),
 			array(
@@ -416,6 +500,68 @@ final class Page implements Service {
 	}
 
 	/**
+	 * Track: the lock switch and how long "Change it here anyway" lasts.
+	 */
+	public function handle_lock_settings(): void {
+		$this->guard( 'axle_config_sync_lock_settings' );
+
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Checked in guard().
+		$enabled = ! empty( $_POST['lock_enabled'] );
+		$minutes = isset( $_POST['lock_minutes'] ) ? absint( wp_unslash( $_POST['lock_minutes'] ) ) : 30;
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+		if ( $this->lock ) {
+			$this->lock->save_settings( $enabled, $minutes );
+		}
+
+		$this->done( 'success', __( 'Lock settings saved.', 'axle-config-sync' ), 'track' );
+	}
+
+	/**
+	 * Drift: the bulk action on the ticked rows.
+	 */
+	public function handle_drift_bulk(): void {
+		$this->guard( 'axle_config_sync_drift_bulk' );
+
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Checked in guard().
+		$do  = isset( $_POST['bulk'] ) ? sanitize_key( wp_unslash( $_POST['bulk'] ) ) : '';
+		$ids = isset( $_POST['items'] ) ? array_map( 'sanitize_text_field', (array) wp_unslash( $_POST['items'] ) ) : array();
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+		if ( ! in_array( $do, array( 'keep', 'putback', 'expect' ), true ) ) {
+			$this->done( 'error', __( 'Choose a bulk action first.', 'axle-config-sync' ), 'drift' );
+			return;
+		}
+		if ( ! $ids ) {
+			$this->done( 'error', __( 'Tick the items first.', 'axle-config-sync' ), 'drift' );
+			return;
+		}
+
+		if ( 'putback' === $do ) {
+			wp_safe_redirect(
+				self::url(
+					'status',
+					array(
+						'step'     => 'preview',
+						'items'    => $ids,
+						'_wpnonce' => wp_create_nonce( 'axle_config_sync_preview' ),
+					)
+				)
+			);
+			exit;
+		}
+
+		if ( 'expect' === $do ) {
+			$this->drift->expect( $ids );
+			$this->drift->check( 'admin', false );
+			$this->done( 'success', __( 'Added to the expected list. Changes to these items are no longer reported. Take them off the list below to report them again.', 'axle-config-sync' ), 'drift' );
+			return;
+		}
+
+		$this->handle_drift_keep_ids( $ids, false );
+	}
+
+	/**
 	 * Drift: run the check now.
 	 */
 	public function handle_drift_check(): void {
@@ -451,6 +597,16 @@ final class Page implements Service {
 		$ids = isset( $_POST['items'] ) ? array_map( 'sanitize_text_field', (array) wp_unslash( $_POST['items'] ) ) : array();
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
+		$this->handle_drift_keep_ids( $ids, $all );
+	}
+
+	/**
+	 * Writes the live values of drifted items to the files.
+	 *
+	 * @param string[] $ids Item IDs.
+	 * @param bool     $all Every drifted item.
+	 */
+	private function handle_drift_keep_ids( array $ids, bool $all ): void {
 		if ( ! $all && ! $ids ) {
 			$this->done( 'error', __( 'Pick the items to keep, or keep all of them.', 'axle-config-sync' ), 'drift' );
 			return;
@@ -506,6 +662,27 @@ final class Page implements Service {
 	}
 
 	/**
+	 * Drift: "Expect this change" as a row action link.
+	 */
+	public function handle_drift_expect_link(): void {
+		if ( ! current_user_can( Settings::capability() ) ) {
+			wp_die( esc_html__( 'Sorry, you are not allowed to do that.', 'axle-config-sync' ), 403 );
+		}
+		check_admin_referer( 'axle_config_sync_drift_expect_link' );
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Checked above.
+		$id = isset( $_GET['item'] ) ? Drift::clean_id( sanitize_text_field( wp_unslash( $_GET['item'] ) ) ) : '';
+		if ( '' === $id ) {
+			$this->done( 'error', __( 'Pick an item or type an item ID.', 'axle-config-sync' ), 'drift' );
+			return;
+		}
+
+		$this->drift->expect( array( $id ) );
+		$this->drift->check( 'admin', false );
+		$this->done( 'success', __( 'Added to the expected list. Changes to these items are no longer reported. Take them off the list below to report them again.', 'axle-config-sync' ), 'drift' );
+	}
+
+	/**
 	 * Drift: email and webhook settings.
 	 */
 	public function handle_drift_notify(): void {
@@ -526,11 +703,11 @@ final class Page implements Service {
 		);
 
 		if ( '' !== $webhook && '' === $this->drift->settings()['webhook'] ) {
-			$this->done( 'warning', __( 'The webhook address was not saved: it must be a public http or https URL. The other settings were saved.', 'axle-config-sync' ), 'drift' );
+			$this->done( 'warning', __( 'The webhook address was not saved: it must be a public http or https URL. The other settings were saved.', 'axle-config-sync' ), 'track' );
 			return;
 		}
 
-		$this->done( 'success', __( 'Drift alerts saved.', 'axle-config-sync' ), 'drift' );
+		$this->done( 'success', __( 'Drift alerts saved.', 'axle-config-sync' ), 'track' );
 	}
 
 	/**

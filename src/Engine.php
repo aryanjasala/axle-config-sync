@@ -695,7 +695,12 @@ final class Engine {
 	private function write_item( Provider $provider, string $id, $value ): void {
 		Drift::silently(
 			static function () use ( $provider, $id, $value ): void {
-				$provider->write( $id, $value );
+				// The lock never stops this plugin's own apply or undo: it is how git reaches production.
+				Lock::bypass(
+					static function () use ( $provider, $id, $value ): void {
+						$provider->write( $id, $value );
+					}
+				);
 			}
 		);
 	}

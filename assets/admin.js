@@ -1,5 +1,5 @@
 /**
- * Settings > Config Sync: item selection, the in-place confirm steps, chunked
+ * Settings > Config Sync: the in-place confirm steps, chunked
  * applies for large sets, copy buttons, live announcements and the wp.hooks
  * extension points.
  *
@@ -46,31 +46,6 @@
 			const position = a || b;
 			const value = position ? values[ parseInt( position, 10 ) - 1 ] : values[ index++ ];
 			return undefined === value ? match : String( value );
-		} );
-	}
-
-	function selection() {
-		document.querySelectorAll( '[data-acs-select]' ).forEach( ( button ) => {
-			button.addEventListener( 'click', () => {
-				const rule = button.getAttribute( 'data-acs-select' );
-				const rows = document.querySelectorAll( '.acs-pick tbody tr' );
-				rows.forEach( ( row ) => {
-					const box = row.querySelector( 'input[type="checkbox"]' );
-					if ( ! box ) {
-						return;
-					}
-					if ( 'all' === rule ) {
-						box.checked = true;
-					} else if ( 'none' === rule ) {
-						box.checked = false;
-					} else {
-						const [ kind, value ] = rule.split( ':' );
-						if ( row.getAttribute( 'data-' + kind ) === value ) {
-							box.checked = true;
-						}
-					}
-				} );
-			} );
 		} );
 	}
 
@@ -291,7 +266,6 @@
 	}
 
 	function init() {
-		selection();
 		diffs();
 		warnings();
 		applyForm();

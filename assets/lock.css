@@ -1,0 +1,26 @@
+/* The "Managed in git" mark on core settings screens. */
+.axle-managed-badge {
+	display: inline-block;
+	margin-left: 8px;
+	padding: 1px 8px;
+	border-radius: 2px;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.6;
+	color: #614200;
+	background: #fcf9e8;
+	border: 1px solid #996800;
+}
+
+.axle-managed-summary ul {
+	margin: 0 0 8px 1.5em;
+	list-style: disc;
+}
+
+.axle-managed-summary li {
+	margin-bottom: 4px;
+}
+
+.axle-managed-summary form {
+	display: inline;
+}

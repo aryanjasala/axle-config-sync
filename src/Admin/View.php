@@ -13,6 +13,7 @@ use AryanX\Axle\ConfigSync\Directory;
 use AryanX\Axle\ConfigSync\Drift;
 use AryanX\Axle\ConfigSync\Environment;
 use AryanX\Axle\ConfigSync\Import\WpCfm;
+use AryanX\Axle\ConfigSync\Lock;
 use AryanX\Axle\ConfigSync\Pointer;
 use AryanX\Axle\ConfigSync\Providers\Options;
 use AryanX\Axle\ConfigSync\Rules;
@@ -49,16 +50,25 @@ final class View {
 	private WpCfm $wpcfm;
 
 	/**
+	 * The lock.
+	 *
+	 * @var Lock|null
+	 */
+	private ?Lock $lock;
+
+	/**
 	 * Sets up the view.
 	 *
-	 * @param Engine $engine The engine.
-	 * @param Drift  $drift  The drift watch.
-	 * @param WpCfm  $wpcfm  The WP-CFM importer.
+	 * @param Engine    $engine The engine.
+	 * @param Drift     $drift  The drift watch.
+	 * @param WpCfm     $wpcfm  The WP-CFM importer.
+	 * @param Lock|null $lock   The lock.
 	 */
-	public function __construct( Engine $engine, Drift $drift, WpCfm $wpcfm ) {
+	public function __construct( Engine $engine, Drift $drift, WpCfm $wpcfm, ?Lock $lock = null ) {
 		$this->engine = $engine;
 		$this->drift  = $drift;
 		$this->wpcfm  = $wpcfm;
+		$this->lock   = $lock;
 	}
 
 	/**
@@ -94,15 +104,6 @@ final class View {
 			case 'drift':
 				$this->drift_tab();
 				break;
-			case 'apply':
-				$this->apply_tab();
-				break;
-			case 'export':
-				$this->export_tab();
-				break;
-			case 'import':
-				$this->import_tab();
-				break;
 			case 'track':
 				$this->track_tab();
 				break;
@@ -129,23 +130,22 @@ final class View {
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
 		$intros = array(
-			'status'  => __( 'Compare the settings on this site with the files in the config directory, one item at a time.', 'axle-config-sync' ),
-			'apply'   => __( 'Pick the items to copy from the files onto this site. You see a preview and a diff before anything changes.', 'axle-config-sync' ),
+			'status'  => __( 'Compare the settings on this site with the files in the config directory, one item at a time. Tick items to apply them from the files or write them to the files.', 'axle-config-sync' ),
 			'drift'   => __( 'Settings someone changed on this site after the files were written. Keep the live value in the files, or put the files back before the next deploy overwrites it.', 'axle-config-sync' ),
-			'export'  => __( 'Write the live values to one JSON file per item in the config directory. Commit the directory to git. Secrets are written by name only.', 'axle-config-sync' ),
-			'import'  => __( 'Coming from WP-CFM? Bring its bundles over as Config Sync files. The site is not changed, and the WP-CFM files stay as they are.', 'axle-config-sync' ),
 			/* translators: %s: file name. */
-			'track'   => sprintf( __( 'Choose what Config Sync tracks. The rules are saved to %s in the config directory, so they are in git and reviewed like the rest.', 'axle-config-sync' ), Rules::FILE ),
+			'track'   => sprintf( __( 'Choose what Config Sync tracks, which tracked settings are locked on production, and who hears about drift. The rules are saved to %s in the config directory, so they are in git and reviewed like the rest.', 'axle-config-sync' ), Rules::FILE ),
 			'history' => __( 'Every apply is a change set. Undo puts the earlier values back, and asks you to confirm if something changed since.', 'axle-config-sync' ),
 		);
 
 		$text = $intros[ $tab ] ?? '';
-		if ( 'import' === $tab && isset( $_GET['step'] ) && 'preview' === sanitize_key( wp_unslash( $_GET['step'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only view switch.
-			$text = __( 'Check how each WP-CFM item maps. Nothing is written until you confirm, and the site is never changed.', 'axle-config-sync' );
-		}
-		if ( 'status' === $tab && '' !== $item ) {
+		if ( 'status' === $tab && 'import' === Page::view() ) {
+			$text = __( 'Coming from WP-CFM? Bring its bundles over as Config Sync files. The site is not changed, and the WP-CFM files stay as they are.', 'axle-config-sync' );
+			if ( isset( $_GET['step'] ) && 'preview' === sanitize_key( wp_unslash( $_GET['step'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only view switch.
+				$text = __( 'Check how each WP-CFM item maps. Nothing is written until you confirm, and the site is never changed.', 'axle-config-sync' );
+			}
+		} elseif ( 'status' === $tab && '' !== $item ) {
 			$text = __( 'This item in the files and on this site. Apply the file value after you have read the difference.', 'axle-config-sync' );
-		} elseif ( 'apply' === $tab && $preview ) {
+		} elseif ( 'status' === $tab && $preview ) {
 			$text = __( 'Check what will change. Nothing is written until you apply, and you can undo an apply from History.', 'axle-config-sync' );
 		}
 
@@ -205,6 +205,9 @@ final class View {
 		echo '</dd>';
 		echo '<dt>' . esc_html__( 'Last export', 'axle-config-sync' ) . '</dt><dd>' . self::when_who( $state['last_export'] ) . '</dd>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in when_who().
 		echo '<dt>' . esc_html__( 'Last apply', 'axle-config-sync' ) . '</dt><dd>' . self::when_who( $state['last_apply'] ) . '</dd>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in when_who().
+		if ( $this->lock ) {
+			echo '<dt>' . esc_html__( 'Managed in git', 'axle-config-sync' ) . '</dt><dd>' . esc_html( $this->lock_line() ) . ' <a href="' . esc_url( Page::url( 'track' ) . '#acs-lock-title' ) . '">' . esc_html__( 'Lock settings', 'axle-config-sync' ) . '</a></dd>';
+		}
 		echo '<dt>' . esc_html__( 'Last drift check', 'axle-config-sync' ) . '</dt><dd>' . AxleUi::relative_time( $this->drift->state()['checked_at'], __( 'Not yet', 'axle-config-sync' ) ) . '</dd>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in relative_time().
 		echo '</dl></section>';
 
@@ -213,6 +216,26 @@ final class View {
 		if ( $this->engine->frozen() ) {
 			echo '<div class="notice notice-warning inline"><p>' . esc_html( \AryanX\Axle\ConfigSync\Messages::get( 'frozen' ) ) . '</p></div>';
 		}
+	}
+
+	/**
+	 * One line about the lock for the header.
+	 *
+	 * @return string
+	 */
+	private function lock_line(): string {
+		if ( ! $this->lock || ! $this->lock->production() ) {
+			return __( 'Not locked: only production locks settings.', 'axle-config-sync' );
+		}
+		if ( ! $this->lock->enabled() ) {
+			return __( 'Lock is off.', 'axle-config-sync' );
+		}
+
+		return sprintf(
+			/* translators: %d: number of settings. */
+			_n( '%d setting is locked on this site.', '%d settings are locked on this site.', count( $this->lock->managed_names() ), 'axle-config-sync' ),
+			count( $this->lock->managed_names() )
+		);
 	}
 
 	/**
@@ -259,9 +282,6 @@ final class View {
 		$labels = array(
 			'status'  => __( 'Status', 'axle-config-sync' ),
 			'drift'   => __( 'Drift', 'axle-config-sync' ),
-			'apply'   => __( 'Apply', 'axle-config-sync' ),
-			'export'  => __( 'Export', 'axle-config-sync' ),
-			'import'  => __( 'Import', 'axle-config-sync' ),
 			'track'   => __( 'Track', 'axle-config-sync' ),
 			'history' => __( 'History', 'axle-config-sync' ),
 		);
@@ -283,8 +303,9 @@ final class View {
 	 * Status: counts, filters, the list, or one item's diff.
 	 */
 	private function status_tab(): void {
-		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only filters.
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only filters; the preview step checks its nonce below.
 		$item    = isset( $_GET['item'] ) ? sanitize_text_field( wp_unslash( $_GET['item'] ) ) : '';
+		$step    = isset( $_GET['step'] ) ? sanitize_key( wp_unslash( $_GET['step'] ) ) : '';
 		$filters = array(
 			'provider' => isset( $_GET['provider'] ) ? sanitize_key( wp_unslash( $_GET['provider'] ) ) : '',
 			'state'    => isset( $_GET['state'] ) ? sanitize_key( wp_unslash( $_GET['state'] ) ) : '',
@@ -292,12 +313,22 @@ final class View {
 		);
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
+		if ( 'import' === Page::view() ) {
+			$this->import_tab();
+			return;
+		}
 		if ( '' !== $item ) {
 			$this->item_view( $this->engine->normalize_id( $item ) );
 			return;
 		}
+		if ( 'preview' === $step ) {
+			check_admin_referer( 'axle_config_sync_preview' );
+			$this->preview_step();
+			return;
+		}
 
 		$this->get_started();
+		$this->import_card();
 		$this->block_theme_ops_line();
 
 		$all  = $this->engine->rows();
@@ -320,18 +351,30 @@ final class View {
 		}
 		echo '<ul class="subsubsub acs-counts">' . implode( '', $links ) . '</ul>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
 
-		$this->filter_form( $filters );
+		echo '<form method="get" id="acs-filter-form" action="' . esc_url( admin_url( 'options-general.php' ) ) . '"><input type="hidden" name="page" value="' . esc_attr( Page::SLUG ) . '"><input type="hidden" name="tab" value="status">';
+		if ( '' !== $filters['state'] ) {
+			echo '<input type="hidden" name="state" value="' . esc_attr( $filters['state'] ) . '">';
+		}
+		echo '</form>';
+		echo '<form method="post" id="acs-bulk-form" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="axle_config_sync_bulk">';
+		wp_nonce_field( 'axle_config_sync_bulk' );
+		echo '</form>';
+
+		$this->tablenav( $filters );
 
 		if ( ! $rows ) {
 			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'No items match these filters. Clear them to see every tracked item.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'Clear filters', 'axle-config-sync' ) . '</a></div>';
 			return;
 		}
 
-		echo '<div class="axle-scroll" tabindex="0" role="region" aria-label="' . esc_attr__( 'Tracked items', 'axle-config-sync' ) . '"><table class="widefat striped acs-items"><thead><tr>';
+		echo '<div class="axle-scroll" tabindex="0" role="region" aria-label="' . esc_attr__( 'Tracked items', 'axle-config-sync' ) . '"><table class="widefat striped acs-items acs-pick"><thead><tr>';
+		echo '<td class="check-column"><input type="checkbox" id="acs-select-all"><label class="screen-reader-text" for="acs-select-all">' . esc_html__( 'Select all items', 'axle-config-sync' ) . '</label></td>';
 		echo '<th scope="col">' . esc_html__( 'Item', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'Provider', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'State', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'Notes', 'axle-config-sync' ) . '</th>';
 		echo '</tr></thead><tbody>';
 		foreach ( $rows as $row ) {
-			echo '<tr data-item="' . esc_attr( $row['id'] ) . '" data-state="' . esc_attr( $row['state'] ) . '">';
+			$field = 'acs-item-' . md5( $row['id'] );
+			echo '<tr data-item="' . esc_attr( $row['id'] ) . '" data-state="' . esc_attr( $row['state'] ) . '" data-provider="' . esc_attr( $row['provider'] ) . '">';
+			printf( '<th scope="row" class="check-column"><input type="checkbox" name="items[]" form="acs-bulk-form" value="%1$s" id="%2$s" aria-label="%3$s"></th>', esc_attr( $row['id'] ), esc_attr( $field ), esc_attr( $row['label'] ) );
 			printf(
 				'<td><a class="row-title" href="%1$s">%2$s</a><br><code>%3$s</code></td>',
 				esc_url( Page::url( 'status', array( 'item' => $row['id'] ) ) ),
@@ -345,6 +388,43 @@ final class View {
 			echo '</td></tr>';
 		}
 		echo '</tbody></table></div>';
+	}
+
+	/**
+	 * The bar above the list: bulk actions, then the provider and search filters, like Posts.
+	 *
+	 * @param array $filters Current filters.
+	 */
+	private function tablenav( array $filters ): void {
+		echo '<div class="tablenav top acs-tablenav">';
+		echo '<div class="alignleft actions bulkactions"><label for="acs-bulk" class="screen-reader-text">' . esc_html__( 'Bulk actions', 'axle-config-sync' ) . '</label>';
+		echo '<select name="bulk" id="acs-bulk" form="acs-bulk-form"><option value="">' . esc_html__( 'Bulk actions', 'axle-config-sync' ) . '</option>';
+		echo '<option value="apply">' . esc_html__( 'Apply from files', 'axle-config-sync' ) . '</option>';
+		echo '<option value="export">' . esc_html__( 'Write to files', 'axle-config-sync' ) . '</option>';
+		echo '<option value="zip">' . esc_html__( 'Download files as a zip', 'axle-config-sync' ) . '</option></select> ';
+		echo '<button type="submit" form="acs-bulk-form" class="button action" id="acs-bulk-go">' . esc_html__( 'Apply', 'axle-config-sync' ) . '</button> ';
+		echo '<label class="acs-inactive"><input type="checkbox" name="inactive_theme" value="1" form="acs-bulk-form"> ' . esc_html__( 'Apply to an inactive theme too', 'axle-config-sync' ) . '</label></div>';
+
+		echo '<div class="alignleft actions"><label class="screen-reader-text" for="acs-f-provider">' . esc_html__( 'Filter by provider', 'axle-config-sync' ) . '</label><select id="acs-f-provider" name="provider" form="acs-filter-form"><option value="">' . esc_html__( 'All providers', 'axle-config-sync' ) . '</option>';
+		foreach ( $this->engine->registry()->enabled() as $name => $provider ) {
+			printf( '<option value="%1$s"%2$s>%3$s</option>', esc_attr( $name ), selected( $filters['provider'], $name, false ), esc_html( $provider->title() ) );
+		}
+		echo '</select> <label class="screen-reader-text" for="acs-f-s">' . esc_html__( 'Search items', 'axle-config-sync' ) . '</label><input type="search" id="acs-f-s" name="s" form="acs-filter-form" value="' . esc_attr( $filters['search'] ) . '" placeholder="' . esc_attr__( 'Search items', 'axle-config-sync' ) . '"> ';
+		echo '<button type="submit" form="acs-filter-form" class="button">' . esc_html__( 'Filter', 'axle-config-sync' ) . '</button></div>';
+		echo '</div>';
+	}
+
+	/**
+	 * A card on Status that offers the WP-CFM import, only while WP-CFM data exists.
+	 */
+	private function import_card(): void {
+		if ( ! $this->wpcfm->detected() ) {
+			return;
+		}
+
+		echo '<section class="axle-card acs-import-card" aria-labelledby="acs-import-card-title"><h2 class="axle-card__title" id="acs-import-card-title">' . esc_html__( 'Import from WP-CFM', 'axle-config-sync' ) . '</h2>';
+		echo '<p>' . esc_html__( 'This site has WP-CFM bundles. Bring them over as Config Sync files: you see how each item maps first, and the site is not changed.', 'axle-config-sync' ) . '</p>';
+		echo '<p><a class="button" href="' . esc_url( Page::url( 'import' ) ) . '">' . esc_html__( 'Review the bundles', 'axle-config-sync' ) . '</a></p></section>';
 	}
 
 	/**
@@ -377,7 +457,7 @@ final class View {
 				esc_url(
 					wp_nonce_url(
 						Page::url(
-							'apply',
+							'status',
 							array(
 								'step'  => 'preview',
 								'items' => array( $row['id'] ),
@@ -392,65 +472,6 @@ final class View {
 	}
 
 	/**
-	 * Apply: pick items, then the preview.
-	 */
-	private function apply_tab(): void {
-		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- The preview step checks its nonce below.
-		$step = isset( $_GET['step'] ) ? sanitize_key( wp_unslash( $_GET['step'] ) ) : '';
-		// phpcs:enable WordPress.Security.NonceVerification.Recommended
-
-		if ( 'preview' === $step ) {
-			check_admin_referer( 'axle_config_sync_preview' );
-			$this->preview_step();
-			return;
-		}
-
-		$rows = array_filter(
-			$this->engine->rows(),
-			static function ( array $row ): bool {
-				return in_array( $row['base_state'], Engine::APPLY_STATES, true );
-			}
-		);
-
-		if ( ! $rows ) {
-			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'Nothing to apply: every item is in sync with its file, or only on this site. Items show up here when a file changes.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'See the status', 'axle-config-sync' ) . '</a></div>';
-			return;
-		}
-
-		echo '<form method="get" action="' . esc_url( admin_url( 'options-general.php' ) ) . '" class="acs-apply-pick">';
-		echo '<input type="hidden" name="page" value="' . esc_attr( Page::SLUG ) . '"><input type="hidden" name="tab" value="apply"><input type="hidden" name="step" value="preview">';
-		wp_nonce_field( 'axle_config_sync_preview', '_wpnonce', false );
-
-		echo '<div class="axle-toolbar acs-select" role="group" aria-label="' . esc_attr__( 'Select items', 'axle-config-sync' ) . '"><span>' . esc_html__( 'Select', 'axle-config-sync' ) . '</span> ';
-		echo '<button type="button" class="button button-small" data-acs-select="all">' . esc_html__( 'All', 'axle-config-sync' ) . '</button> ';
-		echo '<button type="button" class="button button-small" data-acs-select="none">' . esc_html__( 'None', 'axle-config-sync' ) . '</button> ';
-		foreach ( Engine::APPLY_STATES as $state ) {
-			echo '<button type="button" class="button button-small" data-acs-select="state:' . esc_attr( $state ) . '">' . esc_html( Engine::state_label( $state ) ) . '</button> ';
-		}
-		foreach ( array_unique( wp_list_pluck( $rows, 'provider' ) ) as $provider ) {
-			echo '<button type="button" class="button button-small" data-acs-select="provider:' . esc_attr( $provider ) . '">' . esc_html( $this->provider_title( $provider ) ) . '</button> ';
-		}
-		echo '</div>';
-
-		echo '<div class="axle-scroll" tabindex="0" role="region" aria-label="' . esc_attr__( 'Items that differ', 'axle-config-sync' ) . '"><table class="widefat striped acs-items acs-pick"><thead><tr><td class="check-column"></td>';
-		echo '<th scope="col">' . esc_html__( 'Item', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'State', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'Notes', 'axle-config-sync' ) . '</th></tr></thead><tbody>';
-		foreach ( $rows as $row ) {
-			$field = 'acs-item-' . md5( $row['id'] );
-			echo '<tr data-state="' . esc_attr( $row['base_state'] ) . '" data-provider="' . esc_attr( $row['provider'] ) . '">';
-			printf( '<th scope="row" class="check-column"><input type="checkbox" name="items[]" value="%1$s" id="%2$s"></th>', esc_attr( $row['id'] ), esc_attr( $field ) );
-			printf( '<td><label for="%1$s"><strong>%2$s</strong> <code>%3$s</code></label></td>', esc_attr( $field ), esc_html( $row['label'] ), esc_html( $row['id'] ) );
-			echo '<td>' . self::state_badge( $row['state'] ) . '</td><td>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in state_badge().
-			$this->notes( $row );
-			echo '</td></tr>';
-		}
-		echo '</tbody></table></div>';
-
-		echo '<p><label><input type="checkbox" name="inactive_theme" value="1"> ' . esc_html__( 'Apply to an inactive theme (theme mods saved for a theme that is not active here)', 'axle-config-sync' ) . '</label></p>';
-		submit_button( __( 'Preview', 'axle-config-sync' ), 'primary', 'acs-preview', false );
-		echo '</form>';
-	}
-
-	/**
 	 * The preview: before and after, warnings, and the Apply form.
 	 */
 	private function preview_step(): void {
@@ -459,7 +480,7 @@ final class View {
 		$theme = ! empty( $_GET['inactive_theme'] );
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
-		echo '<p><a href="' . esc_url( Page::url( 'apply' ) ) . '">' . esc_html__( 'Back to the list', 'axle-config-sync' ) . '</a></p>';
+		echo '<p><a href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'Back to the list', 'axle-config-sync' ) . '</a></p>';
 		if ( ! $ids ) {
 			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'No items are picked. Go back to the list and tick the items to apply.', 'axle-config-sync' ) . '</p></div>';
 			return;
@@ -576,60 +597,6 @@ final class View {
 	}
 
 	/**
-	 * Export: pick items or all tracked; write files or download a zip.
-	 */
-	private function export_tab(): void {
-		$directory = $this->engine->directory();
-		$rows      = array_filter(
-			$this->engine->rows(),
-			static function ( array $row ): bool {
-				return $row['on_site'];
-			}
-		);
-
-		if ( ! $directory->writable() ) {
-			echo '<div class="notice notice-warning inline"><p>' . esc_html( \AryanX\Axle\ConfigSync\Messages::get( 'not_writable', $directory->path() ) ) . '</p></div>';
-		}
-
-		if ( ! $rows ) {
-			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'Nothing is tracked on this site yet. Turn on a provider or add options in Track, then export.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'track' ) ) . '">' . esc_html__( 'Open Track', 'axle-config-sync' ) . '</a></div>';
-			return;
-		}
-
-		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" class="acs-export-form">';
-		echo '<input type="hidden" name="action" value="axle_config_sync_export">';
-		wp_nonce_field( 'axle_config_sync_export' );
-
-		$has_files = (bool) $directory->files();
-		echo '<div class="axle-toolbar acs-export-buttons">';
-		if ( $has_files ) {
-			echo '<button type="button" class="button button-primary" id="acs-export-start" data-acs-reveal="acs-export-confirm">' . esc_html__( 'Export all tracked items', 'axle-config-sync' ) . '</button> ';
-		} else {
-			echo '<button type="submit" name="scope" value="all" class="button button-primary">' . esc_html__( 'Export all tracked items', 'axle-config-sync' ) . '</button> ';
-		}
-		echo '<button type="submit" name="scope" value="selected" class="button">' . esc_html__( 'Export selected', 'axle-config-sync' ) . '</button> ';
-		echo '<label class="acs-zip"><input type="checkbox" name="zip" value="1"> ' . esc_html__( 'Download as a zip instead of writing to the server', 'axle-config-sync' ) . '</label>';
-		echo '</div>';
-
-		if ( $has_files ) {
-			echo '<div class="axle-confirm" id="acs-export-confirm" role="group" aria-labelledby="acs-export-confirm-text" hidden>';
-			echo '<p id="acs-export-confirm-text">' . esc_html__( 'This rewrites the files in the config directory with the live values. Files that differ show up as changes in git, so you can review or revert them there. The old contents are not kept here.', 'axle-config-sync' ) . '</p>';
-			echo '<div class="axle-actions"><button type="submit" name="scope" value="all" class="button button-primary">' . esc_html__( 'Rewrite all files', 'axle-config-sync' ) . '</button> <button type="button" class="button" data-acs-cancel="acs-export-start">' . esc_html__( 'Cancel', 'axle-config-sync' ) . '</button></div>';
-			echo '</div>';
-		}
-
-		echo '<div class="axle-scroll" tabindex="0" role="region" aria-label="' . esc_attr__( 'Items to export', 'axle-config-sync' ) . '"><table class="widefat striped acs-items acs-export-list"><thead><tr><td class="check-column"></td><th scope="col">' . esc_html__( 'Item', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'File', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'State', 'axle-config-sync' ) . '</th></tr></thead><tbody>';
-		foreach ( $rows as $row ) {
-			$field = 'acs-export-' . md5( $row['id'] );
-			echo '<tr>';
-			printf( '<th scope="row" class="check-column"><input type="checkbox" name="items[]" value="%1$s" id="%2$s"></th>', esc_attr( $row['id'] ), esc_attr( $field ) );
-			printf( '<td><label for="%1$s">%2$s <code>%3$s</code></label></td>', esc_attr( $field ), esc_html( $row['label'] ), esc_html( $row['id'] ) );
-			echo '<td><code>' . esc_html( $row['file'] ) . '</code></td><td>' . self::state_badge( $row['state'] ) . '</td></tr>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in state_badge().
-		}
-		echo '</tbody></table></div></form>';
-	}
-
-	/**
 	 * Track: providers, tracked options, "not a secret" marks, and the option picker.
 	 */
 	private function track_tab(): void {
@@ -668,7 +635,49 @@ final class View {
 		submit_button( __( 'Save tracking rules', 'axle-config-sync' ) );
 		echo '</section></form>';
 
+		$this->lock_card();
+		$this->drift_alerts( $this->drift->state() );
 		$this->option_picker();
+	}
+
+	/**
+	 * The lock: what it does here, the switch and how long "Change it here anyway" lasts.
+	 */
+	private function lock_card(): void {
+		if ( ! $this->lock ) {
+			return;
+		}
+
+		$settings = $this->lock->settings();
+		$managed  = $this->lock->managed_names();
+		$env      = AxleUi::environment_type();
+		$now      = time();
+
+		echo '<section class="axle-card acs-lock" aria-labelledby="acs-lock-title"><h2 class="axle-card__title" id="acs-lock-title">' . esc_html__( 'Managed in git', 'axle-config-sync' ) . '</h2>';
+		echo '<p>' . esc_html__( 'On production, a setting that has a file in the config directory says "Managed in git" on its own settings screen, and saving it there is refused. Someone with the capability that owns the setting can choose "Change it here anyway": it lasts a short while, is logged, and the setting stays out of drift reports until the next deploy puts the file value back. WP-CLI, deploys and Config Sync\'s own apply are never locked.', 'axle-config-sync' ) . '</p>';
+
+		if ( defined( 'AXLE_CONFIG_SYNC_LOCK' ) && false === AXLE_CONFIG_SYNC_LOCK ) {
+			echo '<div class="notice notice-info inline"><p>' . esc_html__( 'The lock is switched off by AXLE_CONFIG_SYNC_LOCK in wp-config.php.', 'axle-config-sync' ) . '</p></div>';
+		}
+
+		echo '<dl class="axle-facts"><dt>' . esc_html__( 'Environment', 'axle-config-sync' ) . '</dt><dd>' . esc_html( ucfirst( $env ) ) . ' ';
+		echo $this->lock->production() ? '<span class="axle-badge axle-badge--warning">' . esc_html__( 'Lock applies here', 'axle-config-sync' ) . '</span>' : '<span class="axle-badge axle-badge--neutral">' . esc_html__( 'Settings stay editable here', 'axle-config-sync' ) . '</span>';
+		echo '</dd><dt>' . esc_html__( 'Managed settings', 'axle-config-sync' ) . '</dt><dd>' . esc_html( (string) count( $managed ) ) . '</dd>';
+		foreach ( $this->lock->overrides() as $name => $entry ) {
+			if ( $entry['until'] > $now ) {
+				echo '<dt>' . esc_html__( 'Open override', 'axle-config-sync' ) . '</dt><dd><code>' . esc_html( $name ) . '</code> ' . AxleUi::relative_time( $entry['until'] ) . '</dd>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in relative_time().
+			}
+		}
+		echo '</dl>';
+
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="axle_config_sync_lock_settings">';
+		wp_nonce_field( 'axle_config_sync_lock_settings' );
+		echo '<table class="form-table" role="presentation"><tbody>';
+		echo '<tr><th scope="row">' . esc_html__( 'Lock', 'axle-config-sync' ) . '</th><td><label><input type="checkbox" name="lock_enabled" value="1"' . checked( $settings['enabled'], true, false ) . '> ' . esc_html__( 'Refuse saves of managed settings on production', 'axle-config-sync' ) . '</label></td></tr>';
+		echo '<tr><th scope="row"><label for="acs-lock-minutes">' . esc_html__( 'Change it here anyway lasts', 'axle-config-sync' ) . '</label></th><td><input type="number" id="acs-lock-minutes" name="lock_minutes" min="5" max="1440" step="1" class="small-text" value="' . esc_attr( (string) $settings['minutes'] ) . '" aria-describedby="acs-lock-minutes-help"> ' . esc_html__( 'minutes', 'axle-config-sync' ) . '<p class="description" id="acs-lock-minutes-help">' . esc_html__( 'Between 5 and 1440. Only the person who chose it can save during that time.', 'axle-config-sync' ) . '</p></td></tr>';
+		echo '</tbody></table>';
+		submit_button( __( 'Save lock settings', 'axle-config-sync' ), 'secondary' );
+		echo '</form></section>';
 	}
 
 	/**
@@ -749,7 +758,7 @@ final class View {
 	private function history_tab( int $undo_anyway ): void {
 		$rows = $this->engine->changesets()->recent( 50 );
 		if ( ! $rows ) {
-			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'Nothing applied yet. Each apply shows up here with an Undo button.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'apply' ) ) . '">' . esc_html__( 'Open Apply', 'axle-config-sync' ) . '</a></div>';
+			echo '<div class="axle-empty acs-empty"><p>' . esc_html__( 'Nothing applied yet. Each apply shows up here with an Undo button.', 'axle-config-sync' ) . '</p><a class="button" href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'Open Status', 'axle-config-sync' ) . '</a></div>';
 			return;
 		}
 
@@ -826,32 +835,6 @@ final class View {
 		/* translators: %d: change set ID. */
 		echo '<div class="axle-actions"><button type="submit" class="button button-primary">' . esc_html( sprintf( __( 'Undo change set #%d', 'axle-config-sync' ), $id ) ) . '</button> <button type="button" class="button" data-acs-cancel="' . esc_attr( $start ) . '">' . esc_html__( 'Cancel', 'axle-config-sync' ) . '</button></div>';
 		echo '</div></form>';
-	}
-
-	/**
-	 * The filter form on Status.
-	 *
-	 * @param array $filters Current filters.
-	 */
-	private function filter_form( array $filters ): void {
-		echo '<form method="get" action="' . esc_url( admin_url( 'options-general.php' ) ) . '" class="axle-toolbar acs-filters">';
-		echo '<input type="hidden" name="page" value="' . esc_attr( Page::SLUG ) . '"><input type="hidden" name="tab" value="status">';
-
-		echo '<label for="acs-f-provider">' . esc_html__( 'Provider', 'axle-config-sync' ) . '</label> <select id="acs-f-provider" name="provider"><option value="">' . esc_html__( 'All', 'axle-config-sync' ) . '</option>';
-		foreach ( $this->engine->registry()->enabled() as $name => $provider ) {
-			printf( '<option value="%1$s"%2$s>%3$s</option>', esc_attr( $name ), selected( $filters['provider'], $name, false ), esc_html( $provider->title() ) );
-		}
-		echo '</select> ';
-
-		echo '<label for="acs-f-state">' . esc_html__( 'State', 'axle-config-sync' ) . '</label> <select id="acs-f-state" name="state"><option value="">' . esc_html__( 'All', 'axle-config-sync' ) . '</option>';
-		foreach ( Engine::STATES as $state ) {
-			printf( '<option value="%1$s"%2$s>%3$s</option>', esc_attr( $state ), selected( $filters['state'], $state, false ), esc_html( Engine::state_label( $state ) ) );
-		}
-		echo '</select> ';
-
-		echo '<label for="acs-f-s">' . esc_html__( 'Search', 'axle-config-sync' ) . '</label> <input type="search" id="acs-f-s" name="s" value="' . esc_attr( $filters['search'] ) . '"> ';
-		submit_button( __( 'Filter', 'axle-config-sync' ), 'secondary', '', false );
-		echo '</form>';
 	}
 
 	/**
@@ -962,9 +945,9 @@ final class View {
 			array(
 				'done'  => $exported,
 				'title' => __( 'Write the settings to files', 'axle-config-sync' ),
-				'text'  => __( 'One JSON file per setting, in a folder you commit to git.', 'axle-config-sync' ),
-				'url'   => Page::url( 'export' ),
-				'label' => __( 'Open Export', 'axle-config-sync' ),
+				'text'  => __( 'Tick the items on Status and choose "Write to files": one JSON file per setting, in a folder you commit to git.', 'axle-config-sync' ),
+				'url'   => Page::url( 'status' ),
+				'label' => __( 'Open Status', 'axle-config-sync' ),
 			),
 			array(
 				'done'  => $checked,
@@ -996,6 +979,7 @@ final class View {
 		$state     = $this->drift->state();
 		$items     = $this->drift->items();
 		$writable  = $directory->writable();
+		$settings  = $this->drift->settings();
 
 		echo '<div class="axle-toolbar acs-drift-check">';
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="axle_config_sync_drift_check">';
@@ -1004,27 +988,34 @@ final class View {
 		echo '<span class="axle-toolbar__end">' . esc_html__( 'Last check:', 'axle-config-sync' ) . ' ' . AxleUi::relative_time( $state['checked_at'], __( 'not yet', 'axle-config-sync' ) ) . '</span>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in relative_time().
 		echo '</div>';
 
+		echo '<p class="acs-alerts-line">' . esc_html(
+			sprintf(
+				/* translators: 1: on or off, 2: on or off. */
+				__( 'Alerts: email %1$s, webhook %2$s.', 'axle-config-sync' ),
+				$settings['email'] ? __( 'on', 'axle-config-sync' ) : __( 'off', 'axle-config-sync' ),
+				'' !== $settings['webhook'] ? __( 'on', 'axle-config-sync' ) : __( 'off', 'axle-config-sync' )
+			)
+		) . ' <a href="' . esc_url( Page::url( 'track' ) . '#acs-alerts-title' ) . '">' . esc_html__( 'Change alerts in Track', 'axle-config-sync' ) . '</a></p>';
+
 		if ( ! $items ) {
 			echo '<div class="axle-empty acs-empty"><p>';
-			echo esc_html( $state['checked_at'] > 0 ? __( 'No drift. Every tracked setting still matches its file, or was not changed since the files were written. A check runs once a day, and settings that changed will show up here with who changed them.', 'axle-config-sync' ) : __( 'No drift found yet. A check runs once a day in the background. Settings that someone changes on this site after the files were written will show up here, with who changed them and the choice to keep or put back. Export to files first, so there is something to compare with.', 'axle-config-sync' ) );
-			echo '</p><a class="button" href="' . esc_url( Page::url( 'export' ) ) . '">' . esc_html__( 'Open Export', 'axle-config-sync' ) . '</a></div>';
+			echo esc_html( $state['checked_at'] > 0 ? __( 'No drift. Every tracked setting still matches its file, or was not changed since the files were written. A check runs once a day, and settings that changed will show up here with who changed them.', 'axle-config-sync' ) : __( 'No drift found yet. A check runs once a day in the background. Settings that someone changes on this site after the files were written will show up here, with who changed them and the choice to keep or put back. Write the settings to files first, so there is something to compare with.', 'axle-config-sync' ) );
+			echo '</p><a class="button" href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'Open Status', 'axle-config-sync' ) . '</a></div>';
 		} else {
 			$this->drift_list( $items, $writable );
 		}
 
 		$this->drift_expected();
-		$this->drift_alerts( $state );
 	}
 
 	/**
-	 * The drifted items with their actions.
+	 * The drifted items: one bulk select, a checkbox per row and row actions.
 	 *
 	 * @param array<string, array> $items    Drifted items.
 	 * @param bool                 $writable Whether the config directory can be written.
 	 */
 	private function drift_list( array $items, bool $writable ): void {
 		$count = count( $items );
-		$ids   = array_keys( $items );
 
 		echo '<section class="axle-card acs-drift-list" aria-labelledby="acs-drift-title"><h2 class="axle-card__title" id="acs-drift-title">' . esc_html(
 			sprintf(
@@ -1040,38 +1031,53 @@ final class View {
 		}
 
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" class="acs-drift-form">';
-		echo '<input type="hidden" name="action" value="axle_config_sync_drift_keep">';
-		wp_nonce_field( 'axle_config_sync_drift_keep' );
+		echo '<input type="hidden" name="action" value="axle_config_sync_drift_bulk">';
+		wp_nonce_field( 'axle_config_sync_drift_bulk' );
 
-		echo '<div class="axle-toolbar">';
+		echo '<div class="tablenav top acs-tablenav"><div class="alignleft actions bulkactions"><label for="acs-drift-bulk" class="screen-reader-text">' . esc_html__( 'Bulk actions', 'axle-config-sync' ) . '</label>';
+		echo '<select name="bulk" id="acs-drift-bulk"><option value="">' . esc_html__( 'Bulk actions', 'axle-config-sync' ) . '</option>';
 		if ( $writable ) {
-			echo '<button type="button" class="button" id="acs-keep-all-start" data-acs-reveal="acs-keep-all-confirm">' . esc_html__( 'Write all to files', 'axle-config-sync' ) . '</button>';
-			echo '<button type="button" class="button" id="acs-keep-selected-start" data-acs-reveal="acs-keep-selected-confirm">' . esc_html__( 'Write selected to files', 'axle-config-sync' ) . '</button>';
+			echo '<option value="keep">' . esc_html__( 'Keep site values (write to files)', 'axle-config-sync' ) . '</option>';
 		}
-		printf(
-			'<a class="button" href="%1$s">%2$s</a>',
-			esc_url( wp_nonce_url( Page::url( 'apply', array( 'step' => 'preview', 'items' => $ids ) ), 'axle_config_sync_preview' ) ), // phpcs:ignore WordPress.Arrays.ArrayDeclarationSpacing.AssociativeArrayFound -- Short list.
-			esc_html__( 'Put all back from files (preview first)', 'axle-config-sync' )
-		);
-		echo '</div>';
+		echo '<option value="putback">' . esc_html__( 'Put back from files (preview first)', 'axle-config-sync' ) . '</option>';
+		echo '<option value="expect">' . esc_html__( 'Expect these changes', 'axle-config-sync' ) . '</option></select> ';
+		echo '<button type="submit" class="button action">' . esc_html__( 'Apply', 'axle-config-sync' ) . '</button></div></div>';
 
-		if ( $writable ) {
-			foreach ( array( 'all', 'selected' ) as $scope ) {
-				$box = 'acs-keep-' . $scope . '-confirm';
-				echo '<div class="axle-confirm" id="' . esc_attr( $box ) . '" role="group" aria-labelledby="' . esc_attr( $box ) . '-text" hidden>';
-				echo '<p id="' . esc_attr( $box ) . '-text">' . esc_html( 'all' === $scope ? __( 'This rewrites the file of every item listed here with the value the site has now. Files change in the config directory; git shows the difference, and you can revert it there. Nothing changes on the site.', 'axle-config-sync' ) : __( 'This rewrites the file of each ticked item with the value the site has now. Files change in the config directory; git shows the difference, and you can revert it there. Nothing changes on the site.', 'axle-config-sync' ) ) . '</p>';
-				echo '<div class="axle-actions"><button type="submit" name="scope" value="' . esc_attr( $scope ) . '" class="button button-primary">' . esc_html( 'all' === $scope ? __( 'Write all files', 'axle-config-sync' ) : __( 'Write selected files', 'axle-config-sync' ) ) . '</button> <button type="button" class="button" data-acs-cancel="acs-keep-' . esc_attr( $scope ) . '-start">' . esc_html__( 'Cancel', 'axle-config-sync' ) . '</button></div></div>';
-			}
-		}
-
-		echo '<div class="axle-scroll" tabindex="0" role="region" aria-label="' . esc_attr__( 'Drifted items', 'axle-config-sync' ) . '"><table class="widefat striped acs-items acs-drift"><thead><tr><td class="check-column"></td>';
-		echo '<th scope="col">' . esc_html__( 'Item', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'Changed', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'Files and site', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'Actions', 'axle-config-sync' ) . '</th></tr></thead><tbody>';
+		echo '<div class="axle-scroll" tabindex="0" role="region" aria-label="' . esc_attr__( 'Drifted items', 'axle-config-sync' ) . '"><table class="widefat striped acs-items acs-drift"><thead><tr>';
+		echo '<td class="check-column"><input type="checkbox" id="acs-drift-select-all"><label class="screen-reader-text" for="acs-drift-select-all">' . esc_html__( 'Select all drifted items', 'axle-config-sync' ) . '</label></td>';
+		echo '<th scope="col">' . esc_html__( 'Item', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'Changed', 'axle-config-sync' ) . '</th><th scope="col">' . esc_html__( 'Files and site', 'axle-config-sync' ) . '</th></tr></thead><tbody>';
 
 		foreach ( $items as $id => $item ) {
 			$key = md5( $id );
 			echo '<tr data-item="' . esc_attr( $id ) . '">';
 			printf( '<th scope="row" class="check-column"><input type="checkbox" name="items[]" value="%1$s" id="%2$s" aria-label="%3$s"></th>', esc_attr( $id ), esc_attr( 'acs-drift-' . $key ), esc_attr( $item['label'] ) );
-			printf( '<td><a class="row-title" href="%1$s">%2$s</a><br><code>%3$s</code><br>%4$s</td>', esc_url( Page::url( 'status', array( 'item' => $id ) ) ), esc_html( $item['label'] ), esc_html( $id ), self::state_badge( $item['state'] ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in state_badge().
+			printf( '<td><a class="row-title" href="%1$s">%2$s</a><br><code>%3$s</code> %4$s', esc_url( Page::url( 'status', array( 'item' => $id ) ) ), esc_html( $item['label'] ), esc_html( $id ), self::state_badge( $item['state'] ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in state_badge().
+
+			echo '<ul class="acs-row-actions">';
+			if ( $writable ) {
+				echo '<li><button type="submit" form="acs-keep-form" name="items[]" value="' . esc_attr( $id ) . '" class="button-link">' . esc_html__( 'Keep site value', 'axle-config-sync' ) . '</button></li>';
+			} else {
+				printf(
+					'<li><a href="%1$s">%2$s</a></li>',
+					esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=axle_config_sync_drift_download&item=' . rawurlencode( $id ) ), 'axle_config_sync_drift_download' ) ),
+					esc_html__( 'Download file', 'axle-config-sync' )
+				);
+			}
+			printf(
+				'<li><a href="%1$s">%2$s</a></li>',
+				esc_url( wp_nonce_url( Page::url( 'status', array( 'step' => 'preview', 'items' => array( $id ) ) ), 'axle_config_sync_preview' ) ), // phpcs:ignore WordPress.Arrays.ArrayDeclarationSpacing.AssociativeArrayFound -- Short list.
+				esc_html__( 'Put back', 'axle-config-sync' )
+			);
+			printf(
+				'<li><a href="%1$s">%2$s</a></li>',
+				esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=axle_config_sync_drift_expect_link&item=' . rawurlencode( $id ) ), 'axle_config_sync_drift_expect_link' ) ),
+				esc_html__( 'Expect this change', 'axle-config-sync' )
+			);
+			echo '</ul>';
+			if ( ! $writable ) {
+				$this->copy_file( $id, $key );
+			}
+			echo '</td>';
 
 			echo '<td>';
 			$who = Drift::who_label( $item['who'] );
@@ -1083,33 +1089,13 @@ final class View {
 			}
 			echo AxleUi::relative_time( (int) $item['since'], __( 'Unknown', 'axle-config-sync' ) ) . '</td>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped in relative_time().
 
-			echo '<td><div class="axle-diff"><del><span class="screen-reader-text">' . esc_html__( 'In the files:', 'axle-config-sync' ) . '</span> ' . esc_html( '' === $item['before'] ? '-' : $item['before'] ) . '</del><ins><span class="screen-reader-text">' . esc_html__( 'On this site:', 'axle-config-sync' ) . '</span> ' . esc_html( '' === $item['after'] ? '-' : $item['after'] ) . '</ins></div></td>';
-
-			echo '<td class="acs-drift-actions">';
-			if ( $writable ) {
-				echo '<button type="button" class="button button-small" id="acs-keep-' . esc_attr( $key ) . '-start" data-acs-reveal="acs-keep-' . esc_attr( $key ) . '" aria-expanded="false">' . esc_html__( 'Write to file', 'axle-config-sync' ) . '</button>';
-				echo '<div class="axle-confirm" id="acs-keep-' . esc_attr( $key ) . '" role="group" aria-labelledby="acs-keep-' . esc_attr( $key ) . '-text" hidden><p id="acs-keep-' . esc_attr( $key ) . '-text">' . esc_html__( 'This rewrites the file with the value the site has now. Git shows the change and can revert it. Nothing changes on the site.', 'axle-config-sync' ) . '</p>';
-				echo '<div class="axle-actions"><button type="submit" name="items[]" value="' . esc_attr( $id ) . '" class="button button-primary button-small">' . esc_html__( 'Write this file', 'axle-config-sync' ) . '</button> <button type="button" class="button button-small" data-acs-cancel="acs-keep-' . esc_attr( $key ) . '-start">' . esc_html__( 'Cancel', 'axle-config-sync' ) . '</button></div></div>';
-			} else {
-				printf(
-					'<a class="button button-small" href="%1$s">%2$s</a> ',
-					esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=axle_config_sync_drift_download&item=' . rawurlencode( $id ) ), 'axle_config_sync_drift_download' ) ),
-					esc_html__( 'Download file', 'axle-config-sync' )
-				);
-				$this->copy_file( $id, $key );
-			}
-			printf(
-				'<a class="button button-small" href="%1$s">%2$s</a> ',
-				esc_url( wp_nonce_url( Page::url( 'apply', array( 'step' => 'preview', 'items' => array( $id ) ) ), 'axle_config_sync_preview' ) ), // phpcs:ignore WordPress.Arrays.ArrayDeclarationSpacing.AssociativeArrayFound -- Short list.
-				esc_html__( 'Put back from files', 'axle-config-sync' )
-			);
-			echo '<button type="submit" form="acs-expect-form" name="items[]" value="' . esc_attr( $id ) . '" class="button-link">' . esc_html__( 'Expect this change', 'axle-config-sync' ) . '</button>';
-			echo '</td></tr>';
+			echo '<td><div class="axle-diff axle-diff--labelled"><del data-label="' . esc_attr__( 'Files', 'axle-config-sync' ) . '">' . esc_html( '' === $item['before'] ? '-' : $item['before'] ) . '</del><ins data-label="' . esc_attr__( 'This site', 'axle-config-sync' ) . '">' . esc_html( '' === $item['after'] ? '-' : $item['after'] ) . '</ins></div></td>';
+			echo '</tr>';
 		}
 		echo '</tbody></table></div></form>';
 
-		echo '<form method="post" id="acs-expect-form" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="axle_config_sync_drift_expect"><input type="hidden" name="mode" value="add">';
-		wp_nonce_field( 'axle_config_sync_drift_expect' );
+		echo '<form method="post" id="acs-keep-form" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="axle_config_sync_drift_bulk"><input type="hidden" name="bulk" value="keep">';
+		echo '<input type="hidden" name="_wpnonce" value="' . esc_attr( wp_create_nonce( 'axle_config_sync_drift_bulk' ) ) . '">';
 		echo '</form>';
 		echo '</section>';
 	}
@@ -1224,7 +1210,7 @@ final class View {
 					__( 'No WP-CFM bundles found in %s, and none in its settings in the database. If your bundle files are somewhere else, point Config Sync at that folder with the axle_config_sync_wpcfm_directory filter.', 'axle-config-sync' ),
 					$this->wpcfm->directory()
 				)
-			) . '</p><a class="button" href="' . esc_url( Page::url( 'export' ) ) . '">' . esc_html__( 'Open Export', 'axle-config-sync' ) . '</a></div>';
+			) . '</p><a class="button" href="' . esc_url( Page::url( 'status' ) ) . '">' . esc_html__( 'Open Export', 'axle-config-sync' ) . '</a></div>';
 			$this->wpcfm_commands();
 			return;
 		}

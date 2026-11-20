@@ -43,16 +43,25 @@ final class Abilities implements Service {
 	private Import\WpCfm $wpcfm;
 
 	/**
+	 * The "managed in git" lock.
+	 *
+	 * @var Lock|null
+	 */
+	private ?Lock $lock;
+
+	/**
 	 * Sets up the abilities.
 	 *
 	 * @param Engine       $engine The engine.
 	 * @param Drift        $drift  The drift watch.
 	 * @param Import\WpCfm $wpcfm  The WP-CFM importer.
+	 * @param Lock|null    $lock   The lock.
 	 */
-	public function __construct( Engine $engine, Drift $drift, Import\WpCfm $wpcfm ) {
+	public function __construct( Engine $engine, Drift $drift, Import\WpCfm $wpcfm, ?Lock $lock = null ) {
 		$this->engine = $engine;
 		$this->drift  = $drift;
 		$this->wpcfm  = $wpcfm;
+		$this->lock   = $lock;
 	}
 
 	/**
@@ -156,6 +165,52 @@ final class Abilities implements Service {
 				'idempotent' => true,
 			)
 		);
+
+		if ( $this->lock ) {
+			$this->ability(
+				'get-lock-status',
+				__( 'Get the managed-in-git lock', 'axle-config-sync' ),
+				__( 'Whether managed settings are locked on this site, which settings are managed in git, and which were released with "Change it here anyway" (that choice is made by a person on a settings screen, never by an ability).', 'axle-config-sync' ),
+				array(
+					'type'                 => 'object',
+					'properties'           => new \stdClass(),
+					'additionalProperties' => false,
+					'default'              => array(),
+				),
+				array(
+					'type'       => 'object',
+					'properties' => array(
+						'environment' => array( 'type' => 'string' ),
+						'locking'     => array( 'type' => 'boolean' ),
+						'enabled'     => array( 'type' => 'boolean' ),
+						'managed'     => array(
+							'type'  => 'array',
+							'items' => array( 'type' => 'string' ),
+						),
+						'overrides'   => array(
+							'type'  => 'array',
+							'items' => array(
+								'type'       => 'object',
+								'properties' => array(
+									'option' => array( 'type' => 'string' ),
+									'until'  => array( 'type' => 'integer' ),
+								),
+							),
+						),
+						'released'    => array(
+							'type'  => 'array',
+							'items' => array( 'type' => 'string' ),
+						),
+					),
+				),
+				array( $this, 'get_lock_status' ),
+				$permission,
+				array(
+					'readonly'   => true,
+					'idempotent' => true,
+				)
+			);
+		}
 
 		$this->ability(
 			'get-item-diff',
@@ -720,6 +775,15 @@ final class Abilities implements Service {
 			'force'           => ! empty( $input['force'] ),
 			'inactive_theme'  => ! empty( $input['inactive_theme'] ),
 		);
+	}
+
+	/**
+	 * The lock, for the get-lock-status ability.
+	 *
+	 * @return array
+	 */
+	public function get_lock_status(): array {
+		return $this->lock ? $this->lock->status() : array();
 	}
 
 	/**
